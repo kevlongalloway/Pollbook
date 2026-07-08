@@ -207,7 +207,7 @@ async function viewElection(id) {
     <section class="section" style="margin-top:2rem">
       <div class="section-head">
         <h2>On the ballot</h2>
-        <span class="count">${e.races.length} race${e.races.length === 1 ? '' : 's'} loaded</span>
+        <span class="count">${e.races.length ? `${e.races.length} race${e.races.length === 1 ? '' : 's'}` : e.measure ? 'Ballot measure' : 'No contests loaded'}</span>
       </div>
       ${e.races.length ? e.races.map((r) => `
         <div class="race-block">
@@ -216,9 +216,23 @@ async function viewElection(id) {
             <a class="cand-line" href="#/candidate/${esc(c.id)}">
               <span class="line-oval" aria-hidden="true"></span>
               <span class="cand-name">${esc(c.name)}${c.incumbent ? '<small>Incumbent</small>' : ''}</span>
-              <span class="party">${esc(PARTY_NAMES[c.party] || c.party)}</span>
+              <span class="party party--${esc(c.party)}">${esc(PARTY_NAMES[c.party] || c.party)}</span>
             </a>`).join('')}
         </div>`).join('')
+      : e.measure ? `
+        <div class="measure-block">
+          <p class="measure-q">${esc(e.measure.question)}</p>
+          <div class="measure-choices">
+            <div class="measure-choice measure-choice--for">
+              <span class="measure-label"><span class="oval oval--filled"></span>Vote YES</span>
+              <p>${esc(e.measure.forStatement)}</p>
+            </div>
+            <div class="measure-choice measure-choice--against">
+              <span class="measure-label"><span class="oval"></span>Vote NO</span>
+              <p>${esc(e.measure.againstStatement)}</p>
+            </div>
+          </div>
+        </div>`
       : '<div class="empty">Race data not yet loaded for this election. Connect a ballot data provider to populate contests.</div>'}
     </section>
   `;
@@ -247,23 +261,40 @@ async function viewCandidate(id) {
 
     <article class="detail-card">
       <div class="detail-band">
-        <p class="eyebrow">${esc(PARTY_NAMES[c.party] || c.party)}${c.incumbent ? ' · Incumbent' : ''}</p>
+        <p class="eyebrow"><span class="party-badge party--${esc(c.party)}">${esc(PARTY_NAMES[c.party] || c.party)}</span>${c.incumbent ? ' Incumbent' : ''}</p>
         <h1>${esc(c.name)}</h1>
       </div>
       <dl class="detail-meta">
         <div><dt>Running for</dt><dd>${esc(c.office)}</dd></div>
+        <div><dt>Party</dt><dd>${esc(PARTY_NAMES[c.party] || c.party)}</dd></div>
         <div><dt>Election day</dt><dd>${appearance ? fmtDate(appearance.date) : '—'}</dd></div>
         <div><dt>Campaign site</dt><dd><a href="${esc(c.website)}" target="_blank" rel="noopener">Visit ↗</a></dd></div>
       </dl>
       <p class="detail-desc">${esc(c.bio)}</p>
     </article>
 
+    ${(c.priorities && c.priorities.length) ? `
     <section class="section">
-      <div class="section-head"><h2>Core values</h2></div>
-      <div class="values-grid">
-        ${c.coreValues.map((v) => `
-          <div class="value-item"><span class="oval"></span>${esc(v)}</div>`).join('')}
+      <div class="section-head"><h2>Top priorities</h2></div>
+      <div class="priority-row">
+        ${c.priorities.map((v) => `<span class="priority-chip"><span class="oval"></span>${esc(v)}</span>`).join('')}
       </div>
+    </section>` : ''}
+
+    <section class="section">
+      <div class="section-head">
+        <h2>Where they stand</h2>
+        <span class="count">${c.policyPositions.length} position${c.policyPositions.length === 1 ? '' : 's'}</span>
+      </div>
+      ${c.policyPositions.length ? `
+        <div class="policy-list">
+          ${c.policyPositions.map((p) => `
+            <div class="policy-item">
+              <span class="policy-issue">${esc(p.issue)}</span>
+              <p class="policy-stance">${esc(p.stance)}</p>
+            </div>`).join('')}
+        </div>`
+      : `<div class="empty">This candidate hasn't published concrete policy positions${c.party === 'NP' ? ' — common for nonpartisan and judicial races' : ''}. See their background above and the coverage below.</div>`}
     </section>
 
     <section class="section">
