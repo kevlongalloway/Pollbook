@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Pollbook — Every election. Every ballot. Yours.</title>
+  <meta name="description" content="Find every election you can vote in — from school board to the presidency. Nonpartisan, local-first." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,400..900&family=Public+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/css/styles.css" />
+</head>
+<body>
+
+  <header class="masthead">
+    <a class="wordmark" href="#/home">
+      <span class="wordmark-oval" aria-hidden="true"></span>
+      POLLBOOK
+    </a>
+    <nav class="nav" id="nav">
+      <a href="#/home" data-route="home"><span class="nav-oval"></span>Your ballot</a>
+      <a href="#/browse" data-route="browse"><span class="nav-oval"></span>Browse</a>
+      <a href="#/data" data-route="data"><span class="nav-oval"></span>Data</a>
+    </nav>
+    <div class="masthead-area">
+      <label for="area-select" class="masthead-area-label">My area</label>
+      <select id="area-select" aria-label="Select your state"></select>
+    </div>
+  </header>
+
+  <div class="rulebar" aria-hidden="true">
+    <span></span><span></span><span></span>
+  </div>
+
+  <main id="app" class="app" aria-live="polite">
+    <!-- views render here -->
+  </main>
+
+  <footer class="footer">
+    <div class="footer-inner">
+      <p class="footer-mark">POLLBOOK <span class="footer-oval"></span> FORM PB-100</p>
+      <p class="footer-note">Nonpartisan election awareness. Candidate data shown here is placeholder seed data — connect a live provider before publishing. Always confirm dates and registration deadlines with your state or county election office.</p>
+    </div>
+  </footer>
+
+  <script src="/js/app.js"></script>
+</body>
+</html>
