@@ -36,15 +36,54 @@ router.get('/candidates/:id', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
-// GET /api/stats?state=GA — turnout + registration data for the data view
+// GET /api/stats?state=GA — campaign-finance snapshot for the data view
 router.get('/stats', async (req, res, next) => {
   try {
     res.json(await service.getStats(req.query.state));
   } catch (err) { next(err); }
 });
 
+// GET /api/search?q=name — candidate search across all states (FEC-backed)
+router.get('/search', async (req, res) => {
+  try {
+    res.json(await service.searchCandidates(req.query.q || ''));
+  } catch (err) {
+    // Search is wholly dependent on the live FEC connection — report that
+    // plainly instead of a generic 500.
+    res.status(503).json({ error: 'Candidate search is unavailable — the live FEC data source could not be reached.' });
+  }
+});
+
+// GET /api/committees?q=aipac — PAC / super PAC / committee search
+router.get('/committees', async (req, res) => {
+  try {
+    res.json(await service.searchCommittees(req.query.q || ''));
+  } catch (err) {
+    res.status(503).json({ error: 'Committee search is unavailable — the live FEC data source could not be reached.' });
+  }
+});
+
+// GET /api/committees/:id — committee detail: totals, spending for/against
+router.get('/committees/:id', async (req, res, next) => {
+  try {
+    const committee = await service.getCommitteeById(req.params.id);
+    if (!committee) return res.status(404).json({ error: 'Committee not found' });
+    res.json(committee);
+  } catch (err) { next(err); }
+});
+
+// GET /api/markets/national — balance-of-power prediction markets
+router.get('/markets/national', async (req, res, next) => {
+  try {
+    res.json(await service.getNationalMarkets());
+  } catch (err) { next(err); }
+});
+
 router.use((err, req, res, next) => {
   console.error(err);
+  // Errors flagged with a status carry a user-safe message (e.g. an
+  // upstream data source being down); everything else stays generic.
+  if (err.status) return res.status(err.status).json({ error: err.message });
   res.status(500).json({ error: 'Internal error' });
 });
 

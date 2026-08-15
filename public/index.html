@@ -20,10 +20,15 @@
     <nav class="nav" id="nav">
       <a href="#/home" data-route="home"><span class="nav-oval"></span>Your ballot</a>
       <a href="#/browse" data-route="browse"><span class="nav-oval"></span>Browse</a>
+      <a href="#/pacs" data-route="pacs"><span class="nav-oval"></span>PAC tracker</a>
       <a href="#/data" data-route="data"><span class="nav-oval"></span>Data</a>
     </nav>
+    <form class="masthead-search" id="search-form" role="search">
+      <input id="search-input" type="search" placeholder="Find a candidate…" aria-label="Search candidates by name" />
+      <button type="submit" aria-label="Search">Go</button>
+    </form>
     <div class="masthead-area">
-      <label for="area-select" class="masthead-area-label">My area</label>
+      <label for="area-select" class="masthead-area-label">My state</label>
       <select id="area-select" aria-label="Select your state"></select>
     </div>
   </header>
@@ -39,7 +44,7 @@
   <footer class="footer">
     <div class="footer-inner">
       <p class="footer-mark">POLLBOOK <span class="footer-oval"></span> FORM PB-100</p>
-      <p class="footer-note">Nonpartisan election awareness. Candidate data shown here is placeholder seed data — connect a live provider before publishing. Always confirm dates and registration deadlines with your state or county election office.</p>
+      <p class="footer-note">Nonpartisan election awareness, covering all 50 states and DC. Federal candidate lists and fundraising come live from the FEC; win probabilities are prediction-market prices (PredictIt), not forecasts; candidate backgrounds are drawn from Wikipedia and linked news coverage. Always confirm dates, deadlines, and your exact ballot with your state or county election office.</p>
     </div>
   </footer>
 
