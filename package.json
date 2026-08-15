@@ -5,7 +5,8 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "dev": "node --watch server.js",
+    "dev": "node --watch --env-file-if-exists=.env server.js",
+    "check:fec": "node scripts/check-fec.js",
     "test": "node test/unit.js && node test/pagination.js"
   },
   "engines": {

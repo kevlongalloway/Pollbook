@@ -194,6 +194,72 @@ async function searchCandidates(q, { limit = 20 } = {}) {
   });
 }
 
+/* ---------------- key health ---------------- */
+
+/** True when the running process has its own key rather than the shared demo one. */
+const hasOwnKey = () => Boolean(process.env.FEC_API_KEY);
+
+/**
+ * Classify an FEC failure into something actionable (pure — unit tested).
+ * api.data.gov fronts the FEC and returns 403 for a bad/missing key and 429
+ * when a key is over its rate limit.
+ */
+function classifyFecError(status, body = '') {
+  const text = String(body);
+  if (status === 429 || /OVER_RATE_LIMIT|rate limit exceeded/i.test(text)) {
+    return {
+      ok: false,
+      status: 'rate_limited',
+      message: hasOwnKey()
+        ? 'Your FEC key is over its hourly rate limit. It will reset within the hour.'
+        : 'The shared DEMO_KEY is over its rate limit (30 requests/hour, shared by everyone using it). Set FEC_API_KEY to your own key.',
+    };
+  }
+  if (status === 403) {
+    if (/API_KEY_INVALID|not a valid API key/i.test(text)) {
+      return { ok: false, status: 'invalid_key', message: 'The FEC rejected this API key as invalid. Check FEC_API_KEY for stray spaces or quotes.' };
+    }
+    if (/API_KEY_MISSING/i.test(text)) {
+      return { ok: false, status: 'missing_key', message: 'No API key was sent to the FEC.' };
+    }
+    // A 403 with no api.data.gov error code is usually an egress/firewall
+    // block between this server and the FEC, not a key problem.
+    return { ok: false, status: 'blocked', message: 'Got 403 from the FEC without a key error — usually a network/egress block between this server and api.open.fec.gov rather than a bad key.' };
+  }
+  return { ok: false, status: 'unreachable', message: `Could not reach the FEC (HTTP ${status || '—'}).` };
+}
+
+/**
+ * Make one cheap live call to confirm the configured key actually works.
+ * Never returns or logs the key itself.
+ */
+let keyCheckMemo = null; // { at, result } — short-lived so probing can't burn quota
+
+async function checkKey() {
+  if (keyCheckMemo && Date.now() - keyCheckMemo.at < 60_000) return keyCheckMemo.result;
+  const result = await runKeyCheck();
+  keyCheckMemo = { at: Date.now(), result };
+  return result;
+}
+
+async function runKeyCheck() {
+  const usingOwnKey = hasOwnKey();
+  try {
+    // Smallest possible real query.
+    await fetchJson(url('/candidates/', { per_page: 1 }), { timeoutMs: 12000 });
+    return {
+      ok: true,
+      status: 'ok',
+      usingOwnKey,
+      message: usingOwnKey
+        ? 'Your FEC API key is configured and working.'
+        : 'Live FEC data is working, but this is the shared DEMO_KEY (30 requests/hour). Set FEC_API_KEY to your own key.',
+    };
+  } catch (err) {
+    return { ...classifyFecError(err.status, err.body), usingOwnKey };
+  }
+}
+
 /* ---------------- committees (PACs, super PACs, party committees) ---------------- */
 
 const COMMITTEE_TYPE_LABELS = {
@@ -506,6 +572,10 @@ module.exports = {
   aggregateContributors,
   aggregateRecipients,
   aggregateEarmarks,
+  // key health
+  checkKey,
+  classifyFecError,
+  hasOwnKey,
   // Exposed for the pagination test harness.
   __fetchScheduleA: fetchScheduleA,
 };

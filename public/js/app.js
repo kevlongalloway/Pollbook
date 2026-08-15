@@ -780,17 +780,34 @@ const routes = [
   { match: /^#\/committee\/([\w-]+)/, view: (h, m) => viewCommittee(m[1]), route: 'pacs' },
 ];
 
-/** Loud, permanent warning whenever the server isn't serving real data. */
+/**
+ * Site-wide status banner. Driven entirely by /api/meta so it costs no FEC
+ * quota — it disappears once the server is live with its own API key, which
+ * is the quickest confirmation that FEC_API_KEY took effect.
+ */
 function renderModeBanner() {
-  const existing = document.getElementById('mode-banner');
-  if (state.meta.live) return existing?.remove();
-  if (existing) return;
+  document.getElementById('mode-banner')?.remove();
+
+  let level = null;
+  let html = '';
+  if (!state.meta.live) {
+    level = 'error';
+    html = `<strong>Sample data — not real filings.</strong> This server is running with
+      <code>DATA_PROVIDER=${esc(state.meta.provider)}</code>, so every candidate, dollar figure, and PAC on
+      this page is fictional. Set <code>DATA_PROVIDER=live</code> (or remove the variable) to pull live FEC data.`;
+  } else if (state.meta.fecKey === 'DEMO_KEY') {
+    level = 'warn';
+    html = `<strong>Using the shared FEC demo key.</strong> Live data works, but <code>DEMO_KEY</code> allows only
+      30 requests/hour shared across everyone using it, so pages will intermittently show missing data.
+      Set <code>FEC_API_KEY</code> to your own free key — this banner disappears once it's in use.
+      <a href="/api/health/fec" target="_blank" rel="noopener">Test the connection ↗</a>`;
+  }
+  if (!level) return;
+
   const el = document.createElement('div');
   el.id = 'mode-banner';
-  el.className = 'mode-banner';
-  el.innerHTML = `<strong>Sample data — not real filings.</strong> This server is running with
-    <code>DATA_PROVIDER=${esc(state.meta.provider)}</code>, so every candidate, dollar figure, and PAC on
-    this page is fictional. Set <code>DATA_PROVIDER=live</code> (or remove the variable) to pull live FEC data.`;
+  el.className = `mode-banner mode-banner--${level}`;
+  el.innerHTML = html;
   document.querySelector('.rulebar').insertAdjacentElement('afterend', el);
 }
 

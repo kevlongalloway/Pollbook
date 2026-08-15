@@ -7,11 +7,32 @@ Election awareness app covering **all 50 states + DC** — upcoming elections, w
 ```bash
 npm install
 npm start          # http://localhost:3000 — live data, works with zero config
-npm run dev        # auto-restart on change (Node 18+)
-npm test           # offline unit tests (calendar math, parsers)
+npm run dev        # auto-restart on change; loads .env if present
+npm test           # offline tests (calendar math, parsers, FEC pagination)
+npm run check:fec  # confirm your FEC API key works
 ```
 
 Deploys straight to Render as a Node web service (`npm start`, port from `PORT` env).
+
+## Setting your FEC API key
+
+The app runs without a key on the shared `DEMO_KEY`, but that allows only **30 requests/hour across every user of it** — the funding panels alone make several calls per candidate page, so you'll see missing data quickly. Get a free key (instant) at [api.open.fec.gov/developers](https://api.open.fec.gov/developers/).
+
+No code change is needed — the app reads `FEC_API_KEY` from the environment at request time.
+
+**On Render:** Dashboard → your service → **Environment** → *Add Environment Variable* → key `FEC_API_KEY`, value your key → Save. Render redeploys automatically. Don't wrap the value in quotes.
+
+**Locally:** `cp .env.example .env`, paste the key, then `npm run dev`. (`.env` is gitignored — never commit a key.)
+
+**Confirm it worked**, in any of three ways:
+
+| Check | Looks like |
+|---|---|
+| `npm run check:fec` | `✓ Your FEC API key is configured and working.` plus a live sample query |
+| `GET /api/health/fec` | `{"ok":true,"status":"ok","usingOwnKey":true}` — makes one real FEC call |
+| The site itself | The yellow "shared FEC demo key" banner **disappears** once your key is in use |
+
+Startup logs also print `FEC API key: configured ✓`. If something's wrong, the health check names the cause specifically — an invalid key, a rate limit, or a network block between your server and the FEC are three different problems with three different fixes, and it won't confuse them. No endpoint, log line, or error message ever includes the key's value.
 
 ## Data sources (all fetched live, cached in memory)
 
@@ -87,7 +108,8 @@ public/                            Vanilla frontend (hash-routed SPA)
 | `GET /api/committees?q=aipac` | PAC/super-PAC search (alias-aware: AIPAC also finds United Democracy Project) |
 | `GET /api/committees/:id` | Committee detail: totals, spending for/against candidates, top recipients |
 | `GET /api/markets/national` | Balance-of-power prediction markets |
-| `GET /api/meta` | Active data provider — use this to confirm you're seeing live data |
+| `GET /api/meta` | Active data provider and whether an FEC key is configured |
+| `GET /api/health/fec` | Live check that the configured FEC key works (invalid key vs. rate limit vs. network block) |
 
 Election IDs are stable and derived: `ga-general-2026`, `wy-primary-2026`, `us-general-2026`. Candidate IDs are FEC candidate IDs in live mode.
 

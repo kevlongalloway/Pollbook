@@ -11,8 +11,17 @@ router.get('/meta', (req, res) => {
   res.json({
     provider,
     live: provider === 'live',
+    // Reports only whether a key is present — never any part of its value.
     fecKey: process.env.FEC_API_KEY ? 'configured' : 'DEMO_KEY',
   });
+});
+
+// GET /api/health/fec — makes one real FEC call and reports whether the
+// configured key works. Use this to confirm a newly-set FEC_API_KEY.
+router.get('/health/fec', async (req, res) => {
+  const fec = require('../sources/fec');
+  const result = await fec.checkKey();
+  res.status(result.ok ? 200 : 503).json(result);
 });
 
 // GET /api/areas — states + localities available for browsing

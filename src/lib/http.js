@@ -12,7 +12,16 @@ async function fetchRaw(url, { timeoutMs = 10000, headers = {} } = {}) {
     headers: { 'user-agent': USER_AGENT, ...headers },
     redirect: 'follow',
   });
-  if (!res.ok) throw new Error(`HTTP ${res.status} from ${new URL(url).host}`);
+  if (!res.ok) {
+    const err = new Error(`HTTP ${res.status} from ${new URL(url).host}`);
+    // Callers need the status to tell an invalid API key (403) from a rate
+    // limit (429) from an outage. The body often names the exact cause, but
+    // it can contain the request URL — and therefore the API key — so it is
+    // only ever read by callers that scrub it, never logged raw.
+    err.status = res.status;
+    err.body = await res.text().catch(() => '');
+    throw err;
+  }
   return res;
 }
 

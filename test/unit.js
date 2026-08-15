@@ -224,4 +224,44 @@ test('PAC aggregation totals repeated max-out checks across the cycle', () => {
   assert.strictEqual(agg[0].count, 4);
 });
 
+/* ---------------- FEC key diagnostics ---------------- */
+
+test('classifies an invalid API key', () => {
+  const r = fec.classifyFecError(403, JSON.stringify({
+    error: { code: 'API_KEY_INVALID', message: 'An invalid api_key was supplied.' },
+  }));
+  assert.strictEqual(r.status, 'invalid_key');
+  assert.match(r.message, /invalid/i);
+});
+
+test('classifies a rate limit, and says whose', () => {
+  const withOwn = process.env.FEC_API_KEY;
+  process.env.FEC_API_KEY = 'x'.repeat(40);
+  assert.match(fec.classifyFecError(429, 'OVER_RATE_LIMIT').message, /your fec key/i);
+  delete process.env.FEC_API_KEY;
+  assert.match(fec.classifyFecError(429, 'OVER_RATE_LIMIT').message, /DEMO_KEY/);
+  if (withOwn) process.env.FEC_API_KEY = withOwn;
+});
+
+test('a bare 403 reads as a network block, not a bad key', () => {
+  // This is what an egress firewall returns — telling the user their key is
+  // invalid here would send them chasing the wrong problem.
+  const r = fec.classifyFecError(403, '');
+  assert.strictEqual(r.status, 'blocked');
+  assert.match(r.message, /egress|network/i);
+});
+
+test('key-status helpers never expose the key value', () => {
+  const prev = process.env.FEC_API_KEY;
+  process.env.FEC_API_KEY = 'SUPERSECRETKEYVALUE';
+  const serialized = JSON.stringify([
+    fec.classifyFecError(429, 'OVER_RATE_LIMIT'),
+    fec.classifyFecError(403, 'API_KEY_INVALID'),
+    { hasOwnKey: fec.hasOwnKey() },
+  ]);
+  assert.ok(!serialized.includes('SUPERSECRETKEYVALUE'), 'key leaked into diagnostics output');
+  assert.strictEqual(fec.hasOwnKey(), true);
+  if (prev) process.env.FEC_API_KEY = prev; else delete process.env.FEC_API_KEY;
+});
+
 console.log(`${passed} tests passed${process.exitCode ? ' (with failures)' : ''}`);
