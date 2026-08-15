@@ -1,5 +1,6 @@
 const express = require('express');
 const service = require('../services/electionService');
+const { askAboutCandidate } = require('../lib/candidateQa');
 
 const router = express.Router();
 
@@ -45,6 +46,27 @@ router.get('/candidates/:id', async (req, res, next) => {
     const candidate = await service.getCandidateById(req.params.id);
     if (!candidate) return res.status(404).json({ error: 'Candidate not found' });
     res.json(candidate);
+  } catch (err) { next(err); }
+});
+
+// POST /api/candidates/:id/ask — ask an AI question about this candidate.
+// Scoped to U.S. elections/candidates by the system prompt in candidateQa;
+// history comes from (and is stored only in) the caller's browser.
+router.post('/candidates/:id/ask', async (req, res, next) => {
+  try {
+    const { question, history } = req.body || {};
+    if (typeof question !== 'string' || !question.trim()) {
+      return res.status(400).json({ error: 'A question is required.' });
+    }
+    if (question.length > 4000) {
+      return res.status(400).json({ error: 'Question is too long.' });
+    }
+
+    const candidate = await service.getCandidateById(req.params.id);
+    if (!candidate) return res.status(404).json({ error: 'Candidate not found' });
+
+    const answer = await askAboutCandidate(candidate, question.trim(), Array.isArray(history) ? history : []);
+    res.json({ answer });
   } catch (err) { next(err); }
 });
 

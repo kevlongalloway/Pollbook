@@ -1089,6 +1089,77 @@ button.deep-link { cursor: pointer; font-family: var(--font-mono); }
   font-size: 0.64rem;
 }
 
+/* ---------- candidate Q&A (AI) ---------- */
+
+.qa-note {
+  font-size: 0.85rem;
+  color: #4A4F55;
+  max-width: 74ch;
+  margin-bottom: 1rem;
+}
+
+.qa-log {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  max-height: 420px;
+  overflow-y: auto;
+  border: var(--rule-thin);
+  background: var(--white);
+  padding: 1rem;
+  margin-bottom: 1rem;
+}
+
+.qa-msg { max-width: 46ch; }
+.qa-msg p { font-size: 0.92rem; white-space: pre-line; }
+
+.qa-msg-role {
+  display: block;
+  font-family: var(--font-mono);
+  font-size: 0.66rem;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: #4A4F55;
+  margin-bottom: 0.2rem;
+}
+
+.qa-msg--user { align-self: flex-end; text-align: right; }
+.qa-msg--user .qa-msg-role { color: var(--blue); }
+.qa-msg--user p {
+  background: var(--paper);
+  border: var(--rule-thin);
+  padding: 0.6rem 0.8rem;
+  display: inline-block;
+  text-align: left;
+}
+
+.qa-msg--ai .qa-msg-role { color: var(--ink); }
+.qa-msg--ai p {
+  background: var(--white);
+  border-left: 4px solid var(--yellow);
+  padding: 0.6rem 0.8rem;
+}
+
+.qa-msg--pending p { color: #4A4F55; font-style: italic; }
+
+.qa-empty { padding: 1.25rem; }
+
+.qa-form { display: flex; gap: 0.6rem; }
+
+.qa-form input {
+  flex: 1;
+  font-family: var(--font-body);
+  font-size: 0.92rem;
+  border: var(--rule-thin);
+  border-radius: 0;
+  background: var(--white);
+  color: var(--ink);
+  padding: 0.6rem 0.8rem;
+}
+
+.qa-actions { margin-top: 0.6rem; }
+
 /* ---------- responsive ---------- */
 
 @media (max-width: 720px) {
