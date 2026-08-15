@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-labelledby="pollbook-logo-title">
+  <title id="pollbook-logo-title">Pollbook</title>
+  <!-- Master mark. Design system: 1970s U.S. Federal Graphics Standards Manual —
+       flat civic blue field, the filled ballot oval (the one curved object in the
+       system) in signage yellow, over a ballot rule. Colors match css/styles.css. -->
+  <rect width="64" height="64" fill="#2038C8"/>
+  <ellipse cx="32" cy="26" rx="19" ry="11.5" fill="#F2B807"/>
+  <rect x="13" y="45" width="38" height="5" fill="#FDFDFB"/>
+</svg>

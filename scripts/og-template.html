@@ -1,0 +1,433 @@
+<!DOCTYPE html>
+<!-- Source for public/og-image.png (1200×630 link preview card).
+     Rendered to PNG by scripts/generate-assets.js, which swaps the /*__FONT_CSS__*/
+     marker below for @font-face rules carrying the webfonts inline as data URIs,
+     so the render never depends on the network at screenshot time. The marker is
+     a comment so this file stays valid CSS when opened directly.
+
+     This is built from the real components in public/css/styles.css — the
+     masthead and tri-color rulebar, the hero panel with its ink strip header
+     and yellow bordered callout, the section rule, and the ballot-line list
+     with its tag chips — scaled up ~1.25x because the card is usually seen
+     small. Keep it in sync with those rules if the design system moves.
+
+     Nothing here should go stale: no countdowns, no "N days out", no figures
+     that need a data source to stay true. -->
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<style>
+/*__FONT_CSS__*/
+
+:root {
+  --paper: #EFF0EB;
+  --ink: #15181B;
+  --blue: #2038C8;
+  --blue-deep: #17289B;
+  --yellow: #F2B807;
+  --concrete: #C7CBC1;
+  --white: #FDFDFB;
+  --grey-text: #4A4F55;
+
+  --font-display: "Archivo", sans-serif;
+  --font-body: "Public Sans", sans-serif;
+  --font-mono: "IBM Plex Mono", monospace;
+
+  --rule: 3px solid var(--ink);
+  --rule-thin: 2px solid var(--ink);
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  width: 1200px;
+  height: 630px;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font-body);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ---------- the ballot oval (signature element) ---------- */
+
+.oval {
+  display: inline-block;
+  width: 1.35em;
+  height: 0.8em;
+  border: 2.5px solid currentColor;
+  border-radius: 50%;
+  vertical-align: -0.08em;
+  flex-shrink: 0;
+}
+
+.oval--filled { background: currentColor; }
+
+/* ---------- masthead ---------- */
+
+.masthead {
+  background: var(--blue);
+  color: var(--white);
+  height: 82px;
+  padding: 0 44px;
+  display: flex;
+  align-items: center;
+  gap: 34px;
+}
+
+.wordmark {
+  font-family: var(--font-display);
+  font-weight: 900;
+  font-stretch: 118%;
+  font-size: 38px;
+  letter-spacing: 0.04em;
+  display: inline-flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.wordmark .oval { color: var(--yellow); }
+
+.nav {
+  display: flex;
+  gap: 26px;
+  margin-left: 10px;
+}
+
+.nav span {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 15px;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  opacity: 0.85;
+}
+
+.nav .oval { font-size: 15px; }
+.nav .active { opacity: 1; }
+.nav .active .oval { color: var(--yellow); }
+
+.form-no {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-weight: 500;
+  font-size: 15px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  opacity: 0.85;
+}
+
+/* tri-color rule bar under the masthead */
+.rulebar { display: flex; height: 10px; }
+.rulebar span:nth-child(1) { flex: 3; background: var(--blue-deep); }
+.rulebar span:nth-child(2) { flex: 1; background: var(--yellow); }
+.rulebar span:nth-child(3) { flex: 6; background: var(--ink); }
+
+/* ---------- stage ---------- */
+
+.stage {
+  flex: 1;
+  display: flex;
+  align-items: stretch;
+  gap: 34px;
+  padding: 34px 44px;
+}
+
+/* ---------- hero panel ---------- */
+
+.hero {
+  flex: 1;
+  border: var(--rule);
+  background: var(--white);
+  display: flex;
+  flex-direction: column;
+}
+
+.hero-strip {
+  background: var(--ink);
+  color: var(--white);
+  font-family: var(--font-mono);
+  font-weight: 500;
+  font-size: 14px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  padding: 9px 22px;
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.hero-body {
+  padding: 30px 26px 26px;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+}
+
+.hero h1 {
+  font-family: var(--font-display);
+  font-weight: 900;
+  font-stretch: 112%;
+  font-size: 57px;
+  line-height: 1.02;
+  letter-spacing: -0.01em;
+  text-transform: uppercase;
+  white-space: nowrap; /* the <br>s are the only line breaks — never reflow */
+}
+
+.hero h1 .accent { color: var(--blue); }
+
+.hero .lede {
+  margin-top: 16px;
+  font-size: 19px;
+  line-height: 1.45;
+  color: #23282D;
+}
+
+.hero-count {
+  align-self: flex-start;
+  margin-top: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 11px;
+  background: var(--yellow);
+  border: var(--rule);
+  padding: 11px 16px;
+  font-family: var(--font-mono);
+  font-weight: 600;
+  font-size: 15px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+/* ---------- upcoming list ---------- */
+
+.rail {
+  width: 420px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.section-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  border-bottom: var(--rule);
+  padding-bottom: 8px;
+}
+
+.section-head h2 {
+  font-family: var(--font-display);
+  font-weight: 900;
+  font-stretch: 110%;
+  font-size: 25px;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
+.section-head .count {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  letter-spacing: 0.08em;
+}
+
+.ballot-line {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 17px 2px;
+  border-bottom: var(--rule-thin);
+}
+
+.line-oval {
+  width: 26px;
+  height: 16px;
+  border: 2.5px solid var(--ink);
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.ballot-line.marked .line-oval { background: var(--blue); border-color: var(--blue); }
+
+.line-main { flex: 1; min-width: 0; }
+
+.line-name {
+  display: block;
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 16px;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+.line-place {
+  display: block;
+  font-size: 13px;
+  color: var(--grey-text);
+  margin-top: 2px;
+  white-space: nowrap;
+}
+
+.tag {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  border: 2px solid var(--ink);
+  padding: 4px 8px;
+  white-space: nowrap;
+}
+
+.tag--local { background: var(--yellow); }
+.tag--state { background: var(--blue); color: var(--white); border-color: var(--blue); }
+.tag--national { background: var(--ink); color: var(--white); }
+
+.line-date {
+  font-family: var(--font-mono);
+  font-weight: 600;
+  font-size: 13px;
+  white-space: nowrap;
+  text-align: right;
+  width: 86px;
+  flex-shrink: 0;
+}
+
+/* the yellow call-to-action card that closes the rail, mirroring
+   .keydate--action on the home view */
+.action {
+  margin-top: auto;
+  background: var(--yellow);
+  border: var(--rule);
+  padding: 14px 18px;
+}
+
+.action dt {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #4A3F05;
+}
+
+.action dd {
+  font-family: var(--font-mono);
+  font-weight: 600;
+  font-size: 18px;
+  margin-top: 5px;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+/* ---------- footer strip ---------- */
+
+.strip {
+  background: var(--ink);
+  color: var(--white);
+  height: 52px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 20px;
+  font-family: var(--font-mono);
+  font-weight: 500;
+  font-size: 17px;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+}
+
+.strip .dot { color: var(--yellow); }
+</style>
+</head>
+<body>
+
+  <header class="masthead">
+    <span class="wordmark"><span class="oval oval--filled"></span>POLLBOOK</span>
+    <span class="nav">
+      <span class="active"><span class="oval oval--filled"></span>Your ballot</span>
+      <span><span class="oval"></span>Browse</span>
+      <span><span class="oval"></span>PAC tracker</span>
+      <span><span class="oval"></span>Data</span>
+    </span>
+    <span class="form-no">Form PB-100</span>
+  </header>
+
+  <div class="rulebar"><span></span><span></span><span></span></div>
+
+  <main class="stage">
+
+    <section class="hero">
+      <div class="hero-strip"><span>Official Sample &mdash; Pollbook</span><span>All 50 States + DC</span></div>
+      <div class="hero-body">
+        <h1>Every election.<br />Not just<br /><span class="accent">the big one.</span></h1>
+        <p class="lede">Senate, House, governor, school board — who's on the ticket, where their money comes from, and where they stand.</p>
+        <span class="hero-count"><span class="oval oval--filled"></span>From school board to the presidency</span>
+      </div>
+    </section>
+
+    <aside class="rail">
+      <div class="section-head"><h2>Upcoming</h2><span class="count">4 scheduled</span></div>
+
+      <div class="ballot-line marked">
+        <span class="line-oval"></span>
+        <span class="line-main">
+          <span class="line-name">Statewide Primaries</span>
+          <span class="line-place">Both parties</span>
+        </span>
+        <span class="tag tag--state">State</span>
+        <span class="line-date">Mar–Sep 2026</span>
+      </div>
+
+      <div class="ballot-line">
+        <span class="line-oval"></span>
+        <span class="line-main">
+          <span class="line-name">U.S. Midterm Elections</span>
+          <span class="line-place">Nationwide</span>
+        </span>
+        <span class="tag tag--national">National</span>
+        <span class="line-date">Nov 3, 2026</span>
+      </div>
+
+      <div class="ballot-line">
+        <span class="line-oval"></span>
+        <span class="line-main">
+          <span class="line-name">Governor &amp; Legislature</span>
+          <span class="line-place">50 states + DC</span>
+        </span>
+        <span class="tag tag--state">State</span>
+        <span class="line-date">Nov 3, 2026</span>
+      </div>
+
+      <div class="ballot-line">
+        <span class="line-oval"></span>
+        <span class="line-main">
+          <span class="line-name">School Board &amp; County</span>
+          <span class="line-place">Local ballots</span>
+        </span>
+        <span class="tag tag--local">Local</span>
+        <span class="line-date">Year-round</span>
+      </div>
+
+      <dl class="action">
+        <dt>Not registered?</dt>
+        <dd>Register at vote.gov &#8599;</dd>
+      </dl>
+    </aside>
+
+  </main>
+
+  <footer class="strip">
+    <span>Nonpartisan</span><span class="dot">&bull;</span>
+    <span>Live FEC filings</span><span class="dot">&bull;</span>
+    <span>Market odds</span>
+  </footer>
+
+</body>
+</html>
