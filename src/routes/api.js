@@ -54,6 +54,24 @@ router.get('/search', async (req, res) => {
   }
 });
 
+// GET /api/committees?q=aipac — PAC / super PAC / committee search
+router.get('/committees', async (req, res) => {
+  try {
+    res.json(await service.searchCommittees(req.query.q || ''));
+  } catch (err) {
+    res.status(503).json({ error: 'Committee search is unavailable — the live FEC data source could not be reached.' });
+  }
+});
+
+// GET /api/committees/:id — committee detail: totals, spending for/against
+router.get('/committees/:id', async (req, res, next) => {
+  try {
+    const committee = await service.getCommitteeById(req.params.id);
+    if (!committee) return res.status(404).json({ error: 'Committee not found' });
+    res.json(committee);
+  } catch (err) { next(err); }
+});
+
 // GET /api/markets/national — balance-of-power prediction markets
 router.get('/markets/national', async (req, res, next) => {
   try {
@@ -63,6 +81,9 @@ router.get('/markets/national', async (req, res, next) => {
 
 router.use((err, req, res, next) => {
   console.error(err);
+  // Errors flagged with a status carry a user-safe message (e.g. an
+  // upstream data source being down); everything else stays generic.
+  if (err.status) return res.status(err.status).json({ error: err.message });
   res.status(500).json({ error: 'Internal error' });
 });
 

@@ -13,6 +13,7 @@
  */
 
 const { STATES, getState, registrationUrl } = require('../data/usStates');
+const { expandQuery } = require('../data/committeeAliases');
 const calendar = require('../lib/calendar');
 const fec = require('../sources/fec');
 const markets = require('../sources/markets');
@@ -150,8 +151,13 @@ module.exports = {
       base = await fec.candidateById(id);
       sources.fec = 'ok';
     } catch (err) {
-      sources.fec = 'error';
-      sources.fecMessage = err.message;
+      // A 404 from the FEC means the id doesn't exist; anything else means
+      // the source is down — say so rather than pretending "not found".
+      if (!/HTTP 404\b/.test(err.message)) {
+        const e = new Error(`Live candidate data (FEC) is unreachable right now (${err.message}). Try again shortly.`);
+        e.status = 503;
+        throw e;
+      }
     }
     if (!base) return null;
 
@@ -161,15 +167,21 @@ module.exports = {
       ? `${officeName} — ${base.state} ${fec.districtLabel(base.district)}`
       : `${officeName} — ${st ? st.name : base.state}`;
 
-    const [finance, wiki, articles, raceMarkets] = await Promise.all([
+    const cycle = calendar.currentCycle();
+    const [finance, wiki, articles, raceMarkets, topPacs, independent] = await Promise.all([
       fec.candidateFinance(id).catch(() => { sources.finance = 'error'; return null; }),
       wikipedia.profileFor(base.name, { state: st?.name, officeFull: base.officeFull })
         .catch(() => { sources.wikipedia = 'error'; return null; }),
       news.articlesFor(base.name, st ? st.name : ''),
       base.office === 'S' || base.office === 'H'
-        ? markets.marketsForRace(base.state, base.office, calendar.currentCycle())
+        ? markets.marketsForRace(base.state, base.office, cycle)
         : Promise.resolve([]),
+      fec.candidatePacContributions(id, cycle)
+        .catch(() => { sources.funding = 'error'; return []; }),
+      fec.candidateIndependentSpending(id, cycle)
+        .catch(() => { sources.funding = 'error'; return []; }),
     ]);
+    if (!sources.funding) sources.funding = 'ok';
 
     const [self] = markets.attachProbabilities(
       [{ id: base.id, name: base.name }], raceMarkets
@@ -187,12 +199,20 @@ module.exports = {
       probability: self.probability ?? null,
       probabilitySource: self.probabilitySource ?? null,
       finance,
+      funding: {
+        topPacs,
+        independent: {
+          support: independent.filter((r) => r.support),
+          oppose: independent.filter((r) => !r.support),
+        },
+      },
       wiki,
       positions: wiki?.positions || [],
       articles,
       links: [
         { label: 'FEC filings', url: `https://www.fec.gov/data/candidate/${encodeURIComponent(base.id)}/` },
         { label: 'Ballotpedia', url: `https://ballotpedia.org/${encodeURIComponent(base.name.replace(/ /g, '_'))}` },
+        { label: 'OpenSecrets', url: `https://www.opensecrets.org/search?q=${encodeURIComponent(base.name)}` },
         ...(wiki ? [{ label: 'Wikipedia', url: wiki.url }] : []),
       ],
       appearances: electionId ? [{
@@ -240,5 +260,64 @@ module.exports = {
 
   async getNationalMarkets() {
     return markets.nationalMarkets();
+  },
+
+  async searchCommittees(q) {
+    const { terms, expansions } = expandQuery(q);
+    if (!terms.length) return { query: q, expansions: [], results: [] };
+    const batches = await Promise.all(terms.map((t) =>
+      fec.searchCommitteesByName(t).catch(() => [])));
+    const seen = new Set();
+    const results = [];
+    for (const batch of batches) {
+      for (const c of batch) {
+        if (seen.has(c.id)) continue;
+        seen.add(c.id);
+        results.push(c);
+      }
+    }
+    return { query: q, expansions, results: results.slice(0, 25) };
+  },
+
+  async getCommitteeById(id) {
+    const sources = {};
+    let info = null;
+    try {
+      info = await fec.committeeById(id);
+      sources.fec = 'ok';
+    } catch (err) {
+      if (!/HTTP 404\b/.test(err.message)) {
+        const e = new Error(`Live committee data (FEC) is unreachable right now (${err.message}). Try again shortly.`);
+        e.status = 503;
+        throw e;
+      }
+    }
+    if (!info) return null;
+
+    const cycle = calendar.currentCycle();
+    const [totals, independent, topRecipients] = await Promise.all([
+      fec.committeeTotals(id).catch(() => { sources.totals = 'error'; return null; }),
+      fec.committeeIndependentSpending(id, cycle)
+        .catch(() => { sources.independent = 'error'; return []; }),
+      fec.committeeTopRecipients(info.name, cycle)
+        .catch(() => { sources.recipients = 'error'; return []; }),
+    ]);
+
+    return {
+      ...info,
+      cycle,
+      totals,
+      independent: {
+        support: independent.filter((r) => r.support),
+        oppose: independent.filter((r) => !r.support),
+      },
+      topRecipients,
+      links: [
+        { label: 'Full FEC profile', url: `https://www.fec.gov/data/committee/${encodeURIComponent(id)}/` },
+        { label: 'OpenSecrets', url: `https://www.opensecrets.org/search?q=${encodeURIComponent(info.name)}` },
+      ],
+      sources,
+      provenance: 'All figures from FEC filings, fetched live. Direct-contribution recipients are aggregated from the largest itemized receipts naming this committee — see the full FEC profile for complete totals.',
+    };
   },
 };

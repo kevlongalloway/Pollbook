@@ -81,10 +81,24 @@ module.exports = {
       return { raceId: r.id, office: r.office, electionId: e?.id, electionName: e?.name, date: e?.date };
     });
 
+    // Deterministic fictional funding so the money UI is exercisable offline.
+    const seed = c.id.length + c.name.length;
     return {
       ...c,
       officeLabel: c.office,
       positions: (c.coreValues || []).map((v) => ({ topic: v, text: '' })),
+      funding: {
+        topPacs: [
+          { name: 'Placeholder Growth PAC', committeeId: 'mock-pac-growth', total: 5000 + seed * 100, count: 2 },
+          { name: 'Fictional Futures Committee', committeeId: 'mock-pac-futures', total: 2500 + seed * 50, count: 1 },
+        ],
+        independent: {
+          support: [{ committeeId: 'mock-super-blue', committee: 'Placeholder Priorities Super PAC', total: 240000 + seed * 1000, support: true }],
+          oppose: seed % 2
+            ? [{ committeeId: 'mock-super-red', committee: 'Imaginary Values Fund', total: 180000 + seed * 900, support: false }]
+            : [],
+        },
+      },
       links: [{ label: 'Campaign site', url: c.website }],
       appearances,
       sources: { mock: 'ok' },
@@ -128,5 +142,45 @@ module.exports = {
 
   async getNationalMarkets() {
     return [];
+  },
+
+  async searchCommittees(q) {
+    const needle = String(q || '').trim().toLowerCase();
+    const all = [
+      { id: 'mock-pac-growth', name: 'Placeholder Growth PAC', type: 'Q', typeLabel: 'PAC', designation: 'Unauthorized', party: null, state: 'GA' },
+      { id: 'mock-super-blue', name: 'Placeholder Priorities Super PAC', type: 'O', typeLabel: 'Super PAC', designation: 'Unauthorized', party: null, state: 'DC' },
+    ];
+    return {
+      query: q,
+      expansions: [],
+      results: needle ? all.filter((c) => c.name.toLowerCase().includes(needle)) : all,
+    };
+  },
+
+  async getCommitteeById(id) {
+    if (!id.startsWith('mock-')) return null;
+    const isSuper = id.includes('super');
+    return {
+      id,
+      name: isSuper ? 'Placeholder Priorities Super PAC' : 'Placeholder Growth PAC',
+      type: isSuper ? 'O' : 'Q',
+      typeLabel: isSuper ? 'Super PAC' : 'PAC',
+      designation: 'Unauthorized',
+      party: null,
+      state: isSuper ? 'DC' : 'GA',
+      cycle: 2026,
+      totals: { cycle: 2026, receipts: 4800000, disbursements: 3900000, independentExpenditures: isSuper ? 3600000 : 0, contributionsToCandidates: isSuper ? 0 : 410000 },
+      independent: {
+        support: isSuper ? [{ committeeId: id, committee: 'Placeholder Priorities Super PAC', candidateId: 'cand-mwhitfield', candidate: 'Marcus Whitfield', total: 2400000, support: true }] : [],
+        oppose: isSuper ? [{ committeeId: id, committee: 'Placeholder Priorities Super PAC', candidateId: 'cand-dokafor', candidate: 'Diane Okafor', total: 1200000, support: false }] : [],
+      },
+      topRecipients: isSuper ? [] : [
+        { name: 'Whitfield For Georgia', committeeId: 'mock-cc-1', total: 10000, count: 2 },
+        { name: 'Mercer For Congress', committeeId: 'mock-cc-2', total: 7500, count: 2 },
+      ],
+      links: [],
+      sources: { mock: 'ok' },
+      provenance: 'Fictional seed data (DATA_PROVIDER=mock).',
+    };
   },
 };

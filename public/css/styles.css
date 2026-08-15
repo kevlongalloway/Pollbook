@@ -994,6 +994,70 @@ a { color: inherit; }
 
 .deep-link:hover { background: var(--yellow); }
 
+/* ---------- money lines (PAC tracker + funding) ---------- */
+
+.money-list { display: flex; flex-direction: column; }
+
+.money-line {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  align-items: center;
+  gap: 0.9rem;
+  padding: 0.75rem 0.6rem;
+  border-bottom: var(--rule-thin);
+  text-decoration: none;
+  background: var(--white);
+  transition: background-color 0.12s ease;
+}
+
+.money-line:first-child { border-top: var(--rule-thin); }
+a.money-line[href]:hover { background: var(--yellow); }
+
+.money-name { font-weight: 600; font-size: 0.95rem; }
+
+.money-name small {
+  display: block;
+  font-weight: 400;
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  color: #4A4F55;
+  letter-spacing: 0.04em;
+}
+
+.money-amount {
+  font-family: var(--font-mono);
+  font-weight: 600;
+  font-size: 0.95rem;
+  white-space: nowrap;
+  text-align: right;
+}
+
+.so-chip {
+  font-family: var(--font-mono);
+  font-size: 0.66rem;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  padding: 0.22rem 0.5rem;
+  border: 1.5px solid var(--ink);
+  white-space: nowrap;
+}
+
+.so-chip--for { background: var(--blue); color: var(--white); border-color: var(--blue); }
+.so-chip--against { background: var(--white); color: #B3231F; border-color: #B3231F; }
+
+.finance-card small {
+  display: block;
+  font-family: var(--font-mono);
+  font-size: 0.64rem;
+  color: #4A4F55;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  margin-top: 0.15rem;
+}
+
+button.deep-link { cursor: pointer; font-family: var(--font-mono); }
+
 /* ---------- data view extras ---------- */
 
 .stats-grid--wide { grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); }

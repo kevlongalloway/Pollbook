@@ -37,6 +37,8 @@ const api = {
   stats: (st) => api.get(`/stats${st ? `?state=${st}` : ''}`),
   search: (q) => api.get(`/search?q=${encodeURIComponent(q)}`),
   nationalMarkets: () => api.get('/markets/national'),
+  committees: (q) => api.get(`/committees?q=${encodeURIComponent(q)}`),
+  committee: (id) => api.get(`/committees/${id}`),
 };
 
 /* ---------------- helpers ---------------- */
@@ -141,6 +143,68 @@ const candLine = (c) => `
     ${probChip(c)}
     <span class="party party--${esc(c.party)}">${esc(PARTY_NAMES[c.party] || c.party)}</span>
   </a>`;
+
+/** A committee/PAC as a clickable money line: name, meta, amount. */
+const moneyLine = ({ href, name, meta, amount, tag }) => `
+  <a class="money-line" ${href ? `href="${esc(href)}"` : ''}>
+    <span class="money-name">${esc(name)}${meta ? `<small>${esc(meta)}</small>` : ''}</span>
+    ${tag ? `<span class="so-chip so-chip--${tag.toLowerCase()}">${esc(tag)}</span>` : ''}
+    <span class="money-amount">${fmtMoney(amount)}</span>
+  </a>`;
+
+const committeeHref = (id) => (id ? `#/committee/${id}` : null);
+
+/** Candidate-page block: who funds this candidate. */
+const fundingSection = (c) => {
+  const f = c.funding || {};
+  const fin = c.finance || {};
+  const mix = [
+    ['Individuals', fin.fromIndividuals],
+    ['PACs & committees', fin.fromPacs],
+    ['Party committees', fin.fromParty],
+  ].filter(([, v]) => v != null && fin.receipts > 0);
+  const support = f.independent?.support || [];
+  const oppose = f.independent?.oppose || [];
+  const hasAnything = mix.length || (f.topPacs || []).length || support.length || oppose.length;
+  if (!hasAnything && c.sources?.funding !== 'error') return '';
+
+  return `
+    <section class="section">
+      <div class="section-head"><h2>Who funds them</h2><span class="count">${c.sources?.mock ? '' : 'FEC filings, fetched live'}</span></div>
+      ${c.sources?.funding === 'error' ? noteBox('Live funding data (FEC) is unreachable right now — this section may be incomplete.') : ''}
+
+      ${mix.length ? `
+        <div class="finance-grid">
+          ${mix.map(([label, v]) => `
+            <div class="finance-card"><dt>${esc(label)}</dt><dd>${fmtMoney(v)}</dd>
+              <small>${Math.round((v / fin.receipts) * 100)}% of money raised</small></div>`).join('')}
+        </div>` : ''}
+
+      ${(f.topPacs || []).length ? `
+        <div class="section-sub"><h3>Top PAC &amp; committee contributions</h3></div>
+        <div class="money-list">
+          ${f.topPacs.map((p) => moneyLine({
+            href: committeeHref(p.committeeId),
+            name: p.name,
+            meta: p.count > 1 ? `${p.count} contributions` : '',
+            amount: p.total,
+          })).join('')}
+        </div>
+        <p class="attribution" style="padding:0.5rem 0 0">Largest itemized contributions from PACs, party committees, and other committees to the campaign. Groups like AIPAC also route money as earmarked individual donations, which appear as individual money — follow the committee links for the full picture.</p>` : ''}
+
+      ${support.length || oppose.length ? `
+        <div class="section-sub"><h3>Outside spending about this candidate</h3></div>
+        <div class="money-list">
+          ${support.map((r) => moneyLine({
+            href: committeeHref(r.committeeId), name: r.committee, amount: r.total, tag: 'For',
+          })).join('')}
+          ${oppose.map((r) => moneyLine({
+            href: committeeHref(r.committeeId), name: r.committee, amount: r.total, tag: 'Against',
+          })).join('')}
+        </div>
+        <p class="attribution" style="padding:0.5rem 0 0">Independent expenditures by super PACs and outside groups. This money is spent for or against the candidate without going to (or being coordinated with) the campaign.</p>` : ''}
+    </section>`;
+};
 
 const raceBlock = (r) => `
   <div class="race-block">
@@ -417,6 +481,8 @@ async function viewCandidate(id) {
       </div>
     </section>` : ''}
 
+    ${fundingSection(c)}
+
     <section class="section">
       <div class="section-head"><h2>Where they stand</h2>${hasPositionTexts ? '<span class="count">From Wikipedia’s political-positions coverage</span>' : ''}</div>
       ${(c.positions || []).length
@@ -539,6 +605,138 @@ async function viewSearch(params) {
   `;
 }
 
+async function viewPacs(params) {
+  const q = (params.get('q') || '').trim();
+
+  let data = { results: [], expansions: [] };
+  let error = null;
+  if (q) {
+    try {
+      data = await api.committees(q);
+    } catch (err) {
+      error = err.message;
+    }
+  }
+
+  const QUICK = ['AIPAC', 'Club for Growth', 'EMILY’s List', 'NRA', 'League of Conservation Voters', 'Fairshake', 'Senate Leadership Fund', 'Senate Majority PAC'];
+
+  app.innerHTML = `
+    <section class="section">
+      <div class="section-head">
+        <h2>PAC &amp; outside-money tracker</h2>
+        <span class="count">${q ? `${data.results.length} committee${data.results.length === 1 ? '' : 's'} for “${esc(q)}”` : 'FEC filings, fetched live'}</span>
+      </div>
+      <p style="max-width:66ch;margin-bottom:1rem">Search any PAC, super PAC, or party committee to see who they fund — and who they spend against. Money reaches candidates two ways: <strong>direct contributions</strong> to the campaign, and <strong>independent expenditures</strong> (super-PAC ads for or against a candidate that never touch the campaign's books). Both come straight from FEC filings.</p>
+
+      <form id="pac-form" class="browse-controls" role="search">
+        <input id="pac-input" type="search" value="${esc(q)}" placeholder="Search committees — try AIPAC…" aria-label="Search PACs and committees" style="flex:2;min-width:220px" />
+        <button type="submit" class="filter-btn">Search</button>
+      </form>
+
+      <div class="links-row" style="margin-bottom:1.5rem">
+        ${QUICK.map((name) => `<button class="deep-link quick-pac" data-q="${esc(name)}">${esc(name)}</button>`).join('')}
+      </div>
+
+      ${(data.expansions || []).length ? noteBox(`Also searching affiliated committees: ${data.expansions.map((e) => `${e.term} — ${e.why}`).join(' ')}`) : ''}
+      ${error ? noteBox(error) : ''}
+
+      ${q && !error ? (data.results.length ? `<div class="money-list">${data.results.map((c) => `
+        <a class="money-line" href="#/committee/${esc(c.id)}">
+          <span class="money-name">${esc(c.name)}<small>${esc(c.typeLabel)}${c.party ? ` · ${esc(c.party)}` : ''}${c.state ? ` · ${esc(c.state)}` : ''}</small></span>
+          <span class="tag">${esc(c.typeLabel)}</span>
+        </a>`).join('')}</div>`
+      : '<div class="empty">No committees match that name in FEC records. Try a shorter fragment of the name.</div>') : ''}
+
+      ${!q ? '<div class="empty">Search a committee above, or tap a quick pick. Every result links to who they fund and who they oppose.</div>' : ''}
+
+      <p class="attribution" style="padding-top:1rem">Looking for registered lobbying — who lobbies Congress on which bills? That's disclosed separately under the Lobbying Disclosure Act: see <a href="https://lda.senate.gov/system/public/" target="_blank" rel="noopener">lda.senate.gov</a> and <a href="https://www.opensecrets.org/federal-lobbying" target="_blank" rel="noopener">OpenSecrets lobbying</a>. This tracker covers campaign money: PACs, super PACs, and party committees.</p>
+    </section>
+  `;
+
+  document.getElementById('pac-form').addEventListener('submit', (e) => {
+    e.preventDefault();
+    const val = document.getElementById('pac-input').value.trim();
+    location.hash = val ? `#/pacs?q=${encodeURIComponent(val)}` : '#/pacs';
+  });
+
+  app.querySelectorAll('.quick-pac').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      location.hash = `#/pacs?q=${encodeURIComponent(btn.dataset.q)}`;
+    });
+  });
+}
+
+async function viewCommittee(id) {
+  const c = await api.committee(id);
+  const support = c.independent?.support || [];
+  const oppose = c.independent?.oppose || [];
+  const isSuper = c.type === 'O' || c.type === 'U';
+
+  const candMoneyLine = (r) => moneyLine({
+    href: r.candidateId ? `#/candidate/${r.candidateId}` : null,
+    name: r.candidate || r.committee,
+    amount: r.total,
+    tag: r.support ? 'For' : 'Against',
+  });
+
+  app.innerHTML = `
+    ${backLink('#/pacs', 'Back to PAC tracker')}
+
+    <article class="detail-card">
+      <div class="detail-band">
+        <p class="eyebrow">${esc(c.typeLabel)}${c.party ? ` · ${esc(c.party)}` : ''}${c.state ? ` · ${esc(c.state)}` : ''}</p>
+        <h1>${esc(c.name)}</h1>
+      </div>
+      ${c.totals ? `
+      <dl class="detail-meta">
+        <div><dt>Raised (${c.totals.cycle})</dt><dd>${fmtMoney(c.totals.receipts)}</dd></div>
+        <div><dt>Spent</dt><dd>${fmtMoney(c.totals.disbursements)}</dd></div>
+        ${c.totals.independentExpenditures ? `<div><dt>Independent expenditures</dt><dd>${fmtMoney(c.totals.independentExpenditures)}</dd></div>` : ''}
+        ${c.totals.contributionsToCandidates ? `<div><dt>Given to candidates</dt><dd>${fmtMoney(c.totals.contributionsToCandidates)}</dd></div>` : ''}
+      </dl>` : ''}
+      ${isSuper ? '<p class="detail-desc">Super PACs may raise unlimited sums but cannot give to campaigns — they spend independently for or against candidates.</p>' : ''}
+    </article>
+
+    ${support.length || oppose.length ? `
+    <section class="section">
+      <div class="section-head">
+        <h2>Spending for &amp; against candidates</h2>
+        <span class="count">${support.length + oppose.length} candidate${support.length + oppose.length === 1 ? '' : 's'} · ${c.cycle} cycle</span>
+      </div>
+      <div class="money-list">
+        ${support.map(candMoneyLine).join('')}
+        ${oppose.map(candMoneyLine).join('')}
+      </div>
+    </section>` : ''}
+
+    ${(c.topRecipients || []).length ? `
+    <section class="section">
+      <div class="section-head"><h2>Top recipients of direct contributions</h2><span class="count">${c.cycle} cycle</span></div>
+      <div class="money-list">
+        ${c.topRecipients.map((r) => moneyLine({
+          href: null,
+          name: r.name,
+          meta: r.count > 1 ? `${r.count} contributions` : '',
+          amount: r.total,
+        })).join('')}
+      </div>
+    </section>` : ''}
+
+    ${!(support.length || oppose.length || (c.topRecipients || []).length)
+      ? '<div class="empty">No candidate spending found for this committee in the current cycle — it may be inactive, or its money may move through other committees. Check the full FEC profile below.</div>' : ''}
+
+    ${(c.links || []).length ? `
+    <section class="section">
+      <div class="section-head"><h2>Go deeper</h2></div>
+      <div class="links-row">
+        ${c.links.map((l) => `<a class="deep-link" href="${esc(l.url)}" target="_blank" rel="noopener">${esc(l.label)} ↗</a>`).join('')}
+      </div>
+    </section>` : ''}
+
+    ${c.provenance ? `<p class="provenance">${esc(c.provenance)}</p>` : ''}
+  `;
+}
+
 /* ---------------- router ---------------- */
 
 const routes = [
@@ -548,6 +746,8 @@ const routes = [
   { match: /^#\/candidate\/([\w-]+)/, view: (h, m) => viewCandidate(m[1]), route: 'home' },
   { match: /^#\/data/, view: () => viewData(), route: 'data' },
   { match: /^#\/search/, view: (h) => viewSearch(new URLSearchParams(h.split('?')[1] || '')), route: 'search' },
+  { match: /^#\/pacs/, view: (h) => viewPacs(new URLSearchParams(h.split('?')[1] || '')), route: 'pacs' },
+  { match: /^#\/committee\/([\w-]+)/, view: (h, m) => viewCommittee(m[1]), route: 'pacs' },
 ];
 
 async function render() {

@@ -44,4 +44,6 @@ module.exports = {
   getStats: NOT_IMPLEMENTED,
   searchCandidates: NOT_IMPLEMENTED,
   getNationalMarkets: NOT_IMPLEMENTED,
+  searchCommittees: NOT_IMPLEMENTED,
+  getCommitteeById: NOT_IMPLEMENTED,
 };

@@ -138,4 +138,55 @@ test('attaches probabilities from general-election market by surname', () => {
   assert.strictEqual(candidates[2].probability, undefined);
 });
 
+/* ---------------- PAC / money tracking ---------------- */
+
+const { expandQuery } = require('../src/data/committeeAliases');
+
+test('AIPAC search expands to United Democracy Project', () => {
+  const { terms, expansions } = expandQuery('aipac');
+  assert.ok(terms.some((t) => /united democracy project/i.test(t)));
+  assert.ok(expansions.length >= 1);
+  assert.match(expansions[0].why, /super PAC/i);
+});
+
+test('plain searches do not expand', () => {
+  const { terms, expansions } = expandQuery('Club for Growth');
+  assert.deepStrictEqual(terms, ['Club for Growth']);
+  assert.strictEqual(expansions.length, 0);
+});
+
+test('committee type labels', () => {
+  assert.strictEqual(fec.committeeTypeLabel('O'), 'Super PAC');
+  assert.strictEqual(fec.committeeTypeLabel('Q'), 'PAC');
+  assert.strictEqual(fec.committeeTypeLabel('X'), 'Party committee');
+  assert.strictEqual(fec.committeeTypeLabel('??'), 'Committee');
+});
+
+test('aggregates PAC contributions by contributor, skipping refunds', () => {
+  const rows = [
+    { contributor_name: 'GOOD GOVERNMENT PAC', contributor_id: 'C001', contribution_receipt_amount: 5000 },
+    { contributor_name: 'GOOD GOVERNMENT PAC', contributor_id: 'C001', contribution_receipt_amount: 2500 },
+    { contributor_name: 'OTHER COMMITTEE', contributor_id: 'C002', contribution_receipt_amount: 1000 },
+    { contributor_name: 'REFUNDED PAC', contributor_id: 'C003', contribution_receipt_amount: -500 },
+  ];
+  const agg = fec.aggregateContributors(rows);
+  assert.strictEqual(agg.length, 2);
+  assert.strictEqual(agg[0].name, 'Good Government Pac');
+  assert.strictEqual(agg[0].total, 7500);
+  assert.strictEqual(agg[0].count, 2);
+  assert.strictEqual(agg[0].committeeId, 'C001');
+});
+
+test('aggregates recipients by committee', () => {
+  const rows = [
+    { committee: { committee_id: 'C010', name: 'SMITH FOR SENATE' }, contribution_receipt_amount: 5000 },
+    { committee: { committee_id: 'C010', name: 'SMITH FOR SENATE' }, contribution_receipt_amount: 5000 },
+    { committee: { committee_id: 'C011', name: 'DOE FOR CONGRESS' }, contribution_receipt_amount: 3000 },
+  ];
+  const agg = fec.aggregateRecipients(rows);
+  assert.strictEqual(agg.length, 2);
+  assert.strictEqual(agg[0].total, 10000);
+  assert.strictEqual(agg[0].name, 'Smith For Senate');
+});
+
 console.log(`${passed} tests passed${process.exitCode ? ' (with failures)' : ''}`);

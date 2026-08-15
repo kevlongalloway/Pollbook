@@ -21,12 +21,15 @@ Deploys straight to Render as a Node web service (`npm start`, port from `PORT` 
 | Federal candidates + fundraising | [FEC API](https://api.open.fec.gov/developers/) | ships with `DEMO_KEY`; set `FEC_API_KEY` (free, instant) for real rate limits |
 | Win probabilities | [PredictIt](https://www.predictit.org) market prices | none |
 | Candidate bios + policy positions | Wikipedia (lead summary + "Political positions" section) | none |
+| PAC contributions + super-PAC spending | FEC (Schedule A itemized receipts, Schedule E independent expenditures) | same FEC key |
 | News coverage | Google News RSS | none |
 | Voter registration | Links to [vote.gov](https://vote.gov) per state | none |
 
 Every source degrades independently — if one is unreachable the page still renders and says which panel is missing. Failed fetches fall back to the last good cached copy.
 
 **Honest-data notes baked into the UI:** win probabilities are prediction-market prices (what traders pay), labeled as such — not forecasts. Wikipedia content is attributed and linked. Governor and other state-office candidates file with states, not the FEC, so those races link out to official sources. Primary dates are statutory but legislatures move them; the footer tells users to confirm with their election office.
+
+**Money tracking:** every candidate page shows the campaign's money mix (individuals vs. PACs vs. party), the largest itemized PAC/committee contributions, and independent expenditures (super-PAC money spent for or against the candidate, which never touches the campaign). The PAC tracker searches any committee and shows who it funds and opposes. Committee-name searches expand through a small, documented alias table of publicly reported affiliations (e.g. AIPAC ↔ United Democracy Project) so an organization's whole footprint surfaces. Registered *lobbying* (LDA filings — who lobbies Congress on which bills) is a separate disclosure system; the tracker links to lda.senate.gov and OpenSecrets for that.
 
 ## Configuration
 
@@ -46,6 +49,7 @@ src/providers/liveProvider.js      Composes the live sources (default)
 src/providers/mockProvider.js      Fictional seed data, works offline
 src/providers/googleCivicProvider.js  Stub with endpoint mapping plan
 src/data/usStates.js               50 states + DC: primaries, 2026 races, registration links
+src/data/committeeAliases.js       Publicly-reported PAC affiliations (AIPAC ↔ United Democracy Project)
 src/lib/calendar.js                Statutory election-date math
 src/lib/cache.js                   TTL cache, stale-on-error
 src/sources/fec.js                 FEC candidates, finance, search
@@ -65,6 +69,8 @@ public/                            Vanilla frontend (hash-routed SPA)
 | `GET /api/candidates/:id` | Bio, policy positions, finance, news, odds, links |
 | `GET /api/stats?state=GA` | Campaign-finance snapshot (top fundraisers) |
 | `GET /api/search?q=name` | Candidate search across all filed federal candidates |
+| `GET /api/committees?q=aipac` | PAC/super-PAC search (alias-aware: AIPAC also finds United Democracy Project) |
+| `GET /api/committees/:id` | Committee detail: totals, spending for/against candidates, top recipients |
 | `GET /api/markets/national` | Balance-of-power prediction markets |
 
 Election IDs are stable and derived: `ga-general-2026`, `wy-primary-2026`, `us-general-2026`. Candidate IDs are FEC candidate IDs in live mode.
