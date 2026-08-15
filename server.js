@@ -18,5 +18,5 @@ app.get('*', (req, res) => {
 
 app.listen(PORT, () => {
   console.log(`Pollbook running → http://localhost:${PORT}`);
-  console.log(`Data provider: ${process.env.DATA_PROVIDER || 'mock'}`);
+  console.log(`Data provider: ${process.env.DATA_PROVIDER || 'live'}`);
 });

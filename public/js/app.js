@@ -1,8 +1,11 @@
-/* Pollbook frontend — vanilla JS, hash routing, talks to /api. */
+/* Pollbook frontend — vanilla JS, hash routing, talks to /api.
+   Covers all 50 states + DC; data arrives live from the backend providers. */
 
 const app = document.getElementById('app');
 const nav = document.getElementById('nav');
 const areaSelect = document.getElementById('area-select');
+const searchForm = document.getElementById('search-form');
+const searchInput = document.getElementById('search-input');
 
 const state = {
   area: localStorage.getItem('pb-area') || 'GA',
@@ -15,7 +18,13 @@ const state = {
 const api = {
   async get(path) {
     const res = await fetch(`/api${path}`);
-    if (!res.ok) throw new Error(`API ${res.status}`);
+    if (!res.ok) {
+      let msg = `API ${res.status}`;
+      try { msg = (await res.json()).error || msg; } catch { /* keep default */ }
+      const err = new Error(msg);
+      err.status = res.status;
+      throw err;
+    }
     return res.json();
   },
   areas: () => api.get('/areas'),
@@ -26,6 +35,8 @@ const api = {
   election: (id) => api.get(`/elections/${id}`),
   candidate: (id) => api.get(`/candidates/${id}`),
   stats: (st) => api.get(`/stats${st ? `?state=${st}` : ''}`),
+  search: (q) => api.get(`/search?q=${encodeURIComponent(q)}`),
+  nationalMarkets: () => api.get('/markets/national'),
 };
 
 /* ---------------- helpers ---------------- */
@@ -46,18 +57,40 @@ const daysUntil = (iso) => {
   return diff >= 0 ? diff : null;
 };
 
+const fmtMoney = (n) => {
+  if (n == null) return '';
+  if (n >= 1e6) return `$${(n / 1e6).toFixed(1)}M`;
+  if (n >= 1e3) return `$${Math.round(n / 1e3)}K`;
+  return `$${n}`;
+};
+
 const PARTY_NAMES = {
   DEM: 'Democratic', REP: 'Republican', IND: 'Independent',
-  LIB: 'Libertarian', GRN: 'Green', NP: 'Nonpartisan',
+  LIB: 'Libertarian', GRN: 'Green', NP: 'Nonpartisan', OTH: 'Other',
 };
+
+const OFFICE_NAMES = { S: 'U.S. Senate', H: 'U.S. House', P: 'President' };
+
+const areaInfo = (code) => state.areas.find((a) => a.code === code);
+const areaName = (code) => areaInfo(code)?.name || code;
 
 const saveTracked = () =>
   localStorage.setItem('pb-tracked', JSON.stringify([...state.tracked]));
+
+const setArea = (code) => {
+  state.area = code;
+  localStorage.setItem('pb-area', code);
+  areaSelect.value = code;
+};
 
 /* ---------------- shared renderers ---------------- */
 
 const scopeTag = (scope) =>
   `<span class="tag tag--${esc(scope)}">${esc(scope)}</span>`;
+
+const probChip = (c) => (c.probability != null
+  ? `<span class="prob" title="Implied win probability — ${esc(c.probabilitySource || 'prediction-market')} price, not a forecast">${c.probability}%</span>`
+  : '');
 
 const ballotLine = (e) => {
   const days = daysUntil(e.date);
@@ -81,37 +114,109 @@ const ballotList = (elections, emptyMsg) =>
 const backLink = (href, label) =>
   `<a class="back-link" href="${href}"><span class="oval"></span>${esc(label)}</a>`;
 
+const noteBox = (text) => `<div class="notice">${esc(text)}</div>`;
+
+/** One prediction market as a block of contract bars. */
+const marketPanel = (m) => `
+  <div class="market">
+    <div class="market-name">${esc(m.name)}${m.url ? ` <a href="${esc(m.url)}" target="_blank" rel="noopener">↗</a>` : ''}</div>
+    ${(m.contracts || []).slice(0, 5).map((c) => {
+      const pct = Math.round((c.price || 0) * 100);
+      return `
+        <div class="market-row">
+          <span class="market-label">${esc(c.name || c.shortName)}</span>
+          <span class="market-track"><span class="market-fill" style="width:${pct}%"></span></span>
+          <span class="market-pct">${pct}%</span>
+        </div>`;
+    }).join('')}
+    <p class="market-caption">Prediction-market prices — what traders will pay, not forecasts or endorsements.</p>
+  </div>`;
+
+const candLine = (c) => `
+  <a class="cand-line" href="#/candidate/${esc(c.id)}">
+    <span class="line-oval" aria-hidden="true"></span>
+    <span class="cand-name">${esc(c.name)}
+      <small>${c.incumbent ? 'Incumbent' : ''}${c.incumbent && c.receipts ? ' · ' : ''}${c.receipts ? `${fmtMoney(c.receipts)} raised` : ''}</small>
+    </span>
+    ${probChip(c)}
+    <span class="party party--${esc(c.party)}">${esc(PARTY_NAMES[c.party] || c.party)}</span>
+  </a>`;
+
+const raceBlock = (r) => `
+  <div class="race-block">
+    <div class="race-office">${esc(r.office)}</div>
+    ${r.candidates.length
+      ? r.candidates.map(candLine).join('')
+      : `<div class="race-empty">${esc(r.note || 'No candidate filings loaded for this race yet.')}</div>`}
+    ${(r.markets || []).length ? marketPanel(r.markets[0]) : ''}
+  </div>`;
+
 /* ---------------- views ---------------- */
 
 async function viewHome() {
-  const [local, national] = await Promise.all([
+  const [elections, natMarkets] = await Promise.all([
     api.elections({ state: state.area }),
-    api.elections({ scope: 'national' }),
+    api.nationalMarkets().catch(() => []),
   ]);
 
-  const localOnly = local.filter((e) => e.scope !== 'national');
-  const next = local[0];
-  const areaName = state.areas.find((a) => a.code === state.area)?.name || state.area;
+  const info = areaInfo(state.area) || {};
+  const name = areaName(state.area);
+  const localOnly = elections.filter((e) => e.scope !== 'national');
+  const national = elections.filter((e) => e.scope === 'national');
+  const next = elections[0];
+  const nextDays = next ? daysUntil(next.date) : null;
+  const primaryDays = daysUntil(info.primaryDate);
 
   app.innerHTML = `
     <section class="hero">
       <div class="hero-strip">
         <span>Official sample — Pollbook</span>
-        <span>Area: ${esc(areaName)}</span>
+        <span>State: ${esc(name)}</span>
       </div>
       <div class="hero-body">
         <h1>Every election.<br>Not just the <span class="accent">big one.</span></h1>
-        <p class="lede">School board, judges, city council, referendums — the races that shape your daily life are the ones most people never hear about. Here's everything on the calendar for ${esc(areaName)}.</p>
-        ${next ? `<span class="hero-count"><span class="oval oval--filled"></span>Next: ${esc(next.name)} — ${fmtDate(next.date)}</span>` : ''}
+        <p class="lede">Senate, House, governor, primaries — here is everything on the calendar for ${esc(name)}, with who's running, where their money comes from, and where they stand.</p>
+        ${next ? `<span class="hero-count"><span class="oval oval--filled"></span>Next: ${esc(next.name)} — ${fmtDate(next.date)}${nextDays != null ? ` · ${nextDays} days` : ''}</span>` : ''}
       </div>
     </section>
 
     <section class="section">
+      <div class="section-head"><h2>Key dates for ${esc(name)}</h2></div>
+      <div class="keydates">
+        <div class="keydate">
+          <dt>Primary</dt>
+          <dd>${info.primaryDate ? fmtDate(info.primaryDate) : 'See note'}</dd>
+          <small>${info.primaryDate ? (primaryDays != null ? `${primaryDays} days out` : 'Held') : 'Schedule varies'}</small>
+        </div>
+        <div class="keydate">
+          <dt>General election</dt>
+          <dd>${fmtDate(info.generalDate)}</dd>
+          <small>${daysUntil(info.generalDate) != null ? `${daysUntil(info.generalDate)} days out` : 'Held'}</small>
+        </div>
+        <div class="keydate">
+          <dt>On the ${new Date().getFullYear()} ballot</dt>
+          <dd class="keydate-chips">
+            ${info.senate2026 ? '<span class="chip">U.S. Senate</span>' : ''}
+            ${info.governor2026 ? '<span class="chip">Governor</span>' : ''}
+            <span class="chip">U.S. House</span>
+          </dd>
+          <small>Plus state &amp; local races</small>
+        </div>
+        <div class="keydate keydate--action">
+          <dt>Not registered?</dt>
+          <dd><a href="${esc(info.registrationUrl || 'https://vote.gov')}" target="_blank" rel="noopener">Register at vote.gov ↗</a></dd>
+          <small>Official state instructions</small>
+        </div>
+      </div>
+      ${info.note ? noteBox(info.note) : ''}
+    </section>
+
+    <section class="section">
       <div class="section-head">
-        <h2>Upcoming in ${esc(areaName)}</h2>
+        <h2>Upcoming in ${esc(name)}</h2>
         <span class="count">${localOnly.length} election${localOnly.length === 1 ? '' : 's'} scheduled</span>
       </div>
-      ${ballotList(localOnly, 'No upcoming elections found for this area.')}
+      ${ballotList(localOnly, 'No upcoming elections found for this state.')}
     </section>
 
     <section class="section">
@@ -120,6 +225,9 @@ async function viewHome() {
         <span class="count">${national.length} scheduled</span>
       </div>
       ${ballotList(national, 'No upcoming national elections found.')}
+      ${natMarkets.length ? `
+        <div class="section-sub"><h3>Control of Congress — market odds</h3></div>
+        <div class="market-grid">${natMarkets.slice(0, 2).map(marketPanel).join('')}</div>` : ''}
     </section>
   `;
 }
@@ -137,12 +245,28 @@ async function viewBrowse(params) {
     .map((a) => `<option value="${esc(a.code)}" ${a.code === selectedState ? 'selected' : ''}>${esc(a.name)}</option>`)
     .join('');
 
-  const scopes = ['', 'local', 'state', 'national'];
+  const scopes = ['', 'state', 'national'];
 
   app.innerHTML = `
     <section class="section">
       <div class="section-head">
-        <h2>Browse elections</h2>
+        <h2>Jump to a state</h2>
+        <span class="count">50 states + DC</span>
+      </div>
+      <div class="state-grid">
+        ${state.areas.map((a) => `
+          <button class="state-tile ${a.code === state.area ? 'active' : ''}" data-code="${esc(a.code)}" title="${esc(a.name)}">
+            <span class="state-code">${esc(a.code)}</span>
+            <span class="state-name">${esc(a.name)}</span>
+            <span class="state-marks">${a.senate2026 ? '<i title="U.S. Senate race in 2026">S</i>' : ''}${a.governor2026 ? '<i title="Governor race in 2026">G</i>' : ''}</span>
+          </button>`).join('')}
+      </div>
+      <p class="legend"><i>S</i> Senate seat on the 2026 ballot &nbsp; <i>G</i> Governor on the 2026 ballot — tap a state to open its ballot.</p>
+    </section>
+
+    <section class="section">
+      <div class="section-head">
+        <h2>All upcoming elections</h2>
         <span class="count">${elections.length} result${elections.length === 1 ? '' : 's'}</span>
       </div>
 
@@ -155,11 +279,19 @@ async function viewBrowse(params) {
           <button class="filter-btn ${s === selectedScope ? 'active' : ''}" data-scope="${s}">
             ${s === '' ? 'All scopes' : s[0].toUpperCase() + s.slice(1)}
           </button>`).join('')}
+        <input id="browse-filter" type="search" placeholder="Filter by name…" aria-label="Filter elections by name" />
       </div>
 
-      ${ballotList(elections, 'Nothing matches these filters. Try widening the search.')}
+      <div id="browse-list">${ballotList(elections, 'Nothing matches these filters. Try widening the search.')}</div>
     </section>
   `;
+
+  app.querySelectorAll('.state-tile').forEach((tile) => {
+    tile.addEventListener('click', () => {
+      setArea(tile.dataset.code);
+      location.hash = '#/home';
+    });
+  });
 
   document.getElementById('browse-state').addEventListener('change', (e) => {
     const q = new URLSearchParams(params);
@@ -174,27 +306,37 @@ async function viewBrowse(params) {
       location.hash = `#/browse?${q}`;
     });
   });
+
+  document.getElementById('browse-filter').addEventListener('input', (e) => {
+    const needle = e.target.value.trim().toLowerCase();
+    const filtered = needle
+      ? elections.filter((el) => el.name.toLowerCase().includes(needle))
+      : elections;
+    document.getElementById('browse-list').innerHTML =
+      ballotList(filtered, 'Nothing matches these filters. Try widening the search.');
+  });
 }
 
 async function viewElection(id) {
   const e = await api.election(id);
   const days = daysUntil(e.date);
-  const regDays = daysUntil(e.registrationDeadline);
   const tracked = state.tracked.has(e.id);
+  const fecDown = e.sources && e.sources.fec === 'error';
+  const raceCount = (e.races || []).length;
 
   app.innerHTML = `
     ${backLink('#/home', 'Back to your ballot')}
 
     <article class="detail-card">
       <div class="detail-band">
-        <p class="eyebrow">${esc(e.type)} · ${esc(e.locality)}${e.state ? `, ${esc(e.state)}` : ''}</p>
+        <p class="eyebrow">${esc(e.type)} · ${esc(e.locality)}${e.state ? `, ${esc(areaName(e.state))}` : ''}</p>
         <h1>${esc(e.name)}</h1>
       </div>
       <dl class="detail-meta">
         <div><dt>Election day</dt><dd>${fmtDate(e.date)}</dd></div>
-        <div><dt>Days remaining</dt><dd>${days != null ? days : '—'}</dd></div>
-        <div><dt>Register by</dt><dd>${fmtDate(e.registrationDeadline)}${regDays != null ? ` (${regDays}d)` : ''}</dd></div>
-        <div><dt>Early voting</dt><dd>${fmtDate(e.earlyVotingStart)}</dd></div>
+        <div><dt>Days remaining</dt><dd>${days != null ? days : 'Held'}</dd></div>
+        ${e.registrationDeadline ? `<div><dt>Register by</dt><dd>${fmtDate(e.registrationDeadline)}</dd></div>` : ''}
+        ${e.registrationUrl ? `<div><dt>Registration</dt><dd><a href="${esc(e.registrationUrl)}" target="_blank" rel="noopener">vote.gov ↗</a></dd></div>` : ''}
       </dl>
       <p class="detail-desc">${esc(e.description)}</p>
     </article>
@@ -207,19 +349,18 @@ async function viewElection(id) {
     <section class="section" style="margin-top:2rem">
       <div class="section-head">
         <h2>On the ballot</h2>
-        <span class="count">${e.races.length} race${e.races.length === 1 ? '' : 's'} loaded</span>
+        <span class="count">${raceCount} race${raceCount === 1 ? '' : 's'} loaded</span>
       </div>
-      ${e.races.length ? e.races.map((r) => `
-        <div class="race-block">
-          <div class="race-office">${esc(r.office)}</div>
-          ${r.candidates.map((c) => `
-            <a class="cand-line" href="#/candidate/${esc(c.id)}">
-              <span class="line-oval" aria-hidden="true"></span>
-              <span class="cand-name">${esc(c.name)}${c.incumbent ? '<small>Incumbent</small>' : ''}</span>
-              <span class="party">${esc(PARTY_NAMES[c.party] || c.party)}</span>
-            </a>`).join('')}
-        </div>`).join('')
-      : '<div class="empty">Race data not yet loaded for this election. Connect a ballot data provider to populate contests.</div>'}
+      ${fecDown ? noteBox('Live candidate data (FEC) is unreachable right now, so candidate lists may be missing or incomplete. They will fill in automatically once the connection recovers.') : ''}
+      ${raceCount
+        ? e.races.map(raceBlock).join('')
+        : (e.scope === 'national'
+            ? '<div class="empty">Pick your state (top right, or via Browse) to see the exact races on your ballot.</div>'
+            : '<div class="empty">No federal races found for this election yet.</div>')}
+      ${e.scope === 'national' && (e.markets || []).length ? `
+        <div class="section-sub"><h3>Control of Congress — market odds</h3></div>
+        <div class="market-grid">${e.markets.slice(0, 2).map(marketPanel).join('')}</div>` : ''}
+      ${e.provenance ? `<p class="provenance">${esc(e.provenance)}</p>` : ''}
     </section>
   `;
 
@@ -240,81 +381,162 @@ async function viewElection(id) {
 
 async function viewCandidate(id) {
   const c = await api.candidate(id);
-  const appearance = c.appearances[0];
+  const appearance = (c.appearances || [])[0];
+  const bio = c.wiki?.extract || c.bio || '';
+  const hasPositionTexts = (c.positions || []).some((p) => p.text);
 
   app.innerHTML = `
     ${backLink(appearance ? `#/election/${esc(appearance.electionId)}` : '#/home', appearance ? `Back to ${appearance.electionName}` : 'Back')}
 
     <article class="detail-card">
-      <div class="detail-band">
-        <p class="eyebrow">${esc(PARTY_NAMES[c.party] || c.party)}${c.incumbent ? ' · Incumbent' : ''}</p>
-        <h1>${esc(c.name)}</h1>
+      <div class="detail-band detail-band--person">
+        ${c.wiki?.thumbnail ? `<img class="portrait" src="${esc(c.wiki.thumbnail)}" alt="Portrait of ${esc(c.name)}" />` : ''}
+        <div>
+          <p class="eyebrow">${esc(PARTY_NAMES[c.party] || c.partyFull || c.party)}${c.incumbent ? ' · Incumbent' : ''}${c.probability != null ? ` · ${c.probability}% market odds` : ''}</p>
+          <h1>${esc(c.name)}</h1>
+        </div>
       </div>
       <dl class="detail-meta">
-        <div><dt>Running for</dt><dd>${esc(c.office)}</dd></div>
+        <div><dt>Running for</dt><dd>${esc(c.officeLabel || c.office)}</dd></div>
+        ${c.stateName ? `<div><dt>State</dt><dd>${esc(c.stateName)}</dd></div>` : ''}
         <div><dt>Election day</dt><dd>${appearance ? fmtDate(appearance.date) : '—'}</dd></div>
-        <div><dt>Campaign site</dt><dd><a href="${esc(c.website)}" target="_blank" rel="noopener">Visit ↗</a></dd></div>
+        ${c.probability != null ? `<div><dt>Win odds<sup>*</sup></dt><dd>${c.probability}%</dd></div>` : ''}
       </dl>
-      <p class="detail-desc">${esc(c.bio)}</p>
+      ${bio ? `<p class="detail-desc">${esc(bio)}</p>` : ''}
+      ${c.wiki ? `<p class="attribution">Background from <a href="${esc(c.wiki.url)}" target="_blank" rel="noopener">Wikipedia: ${esc(c.wiki.title)}</a> — community-edited; verify anything that matters.</p>` : ''}
+      ${c.probability != null ? `<p class="attribution"><sup>*</sup>${esc(c.probabilitySource || 'Prediction-market')} price — what traders will pay, not a forecast.</p>` : ''}
     </article>
 
+    ${c.finance ? `
     <section class="section">
-      <div class="section-head"><h2>Core values</h2></div>
-      <div class="values-grid">
-        ${c.coreValues.map((v) => `
-          <div class="value-item"><span class="oval"></span>${esc(v)}</div>`).join('')}
+      <div class="section-head"><h2>Campaign money</h2><span class="count">FEC totals · ${c.finance.coverageEnd ? `through ${fmtDate(c.finance.coverageEnd)}` : `${c.finance.cycle} cycle`}</span></div>
+      <div class="finance-grid">
+        <div class="finance-card"><dt>Raised</dt><dd>${fmtMoney(c.finance.receipts)}</dd></div>
+        <div class="finance-card"><dt>Spent</dt><dd>${fmtMoney(c.finance.disbursements)}</dd></div>
+        <div class="finance-card"><dt>Cash on hand</dt><dd>${fmtMoney(c.finance.cashOnHand)}</dd></div>
       </div>
+    </section>` : ''}
+
+    <section class="section">
+      <div class="section-head"><h2>Where they stand</h2>${hasPositionTexts ? '<span class="count">From Wikipedia’s political-positions coverage</span>' : ''}</div>
+      ${(c.positions || []).length
+        ? (hasPositionTexts
+          ? c.positions.map((p) => `
+              <details class="position">
+                <summary>${esc(p.topic)}</summary>
+                <p>${esc(p.text)}</p>
+              </details>`).join('')
+          : `<div class="values-grid">${c.positions.map((p) => `
+              <div class="value-item"><span class="oval"></span>${esc(p.topic)}</div>`).join('')}</div>`)
+        : '<div class="empty">No published policy-position summary found for this candidate yet. Try the links below — Ballotpedia and campaign sites usually have platform details first.</div>'}
     </section>
 
     <section class="section">
       <div class="section-head">
         <h2>In the news</h2>
-        <span class="count">${c.articles.length} article${c.articles.length === 1 ? '' : 's'}</span>
+        <span class="count">${(c.articles || []).length && !c.sources?.mock ? 'Live from Google News' : ''}</span>
       </div>
-      ${c.articles.length ? c.articles.map((a) => `
-        <a class="article-line" href="${esc(a.url)}" ${a.url !== '#' ? 'target="_blank" rel="noopener"' : ''}>
+      ${(c.articles || []).length ? c.articles.map((a) => `
+        <a class="article-line" href="${esc(a.url)}" ${a.url && a.url !== '#' ? 'target="_blank" rel="noopener"' : ''}>
           <span class="article-title">${esc(a.title)}</span>
-          <span class="article-src">${esc(a.outlet)} · ${fmtDate(a.date)}</span>
+          <span class="article-src">${esc(a.outlet)}${a.date ? ` · ${fmtDate(a.date)}` : ''}</span>
         </a>`).join('')
-      : '<div class="empty">No coverage indexed yet for this candidate.</div>'}
+      : '<div class="empty">No recent coverage indexed for this candidate.</div>'}
     </section>
+
+    ${(c.links || []).length ? `
+    <section class="section">
+      <div class="section-head"><h2>Go deeper</h2></div>
+      <div class="links-row">
+        ${c.links.map((l) => `<a class="deep-link" href="${esc(l.url)}" target="_blank" rel="noopener">${esc(l.label)} ↗</a>`).join('')}
+      </div>
+    </section>` : ''}
   `;
 }
 
 async function viewData() {
-  const stats = await api.stats();
-  const entries = Object.entries(stats);
+  const [stats, national] = await Promise.all([
+    api.stats(state.area),
+    api.stats().catch(() => null),
+  ]);
+
+  const bars = (payload) => {
+    if (!payload) return '';
+    if (payload.error) return noteBox(payload.error);
+    const top = payload.topFundraisers || [];
+    if (!top.length) return '<div class="empty">No candidate filings found.</div>';
+    const max = Math.max(...top.map((c) => c.receipts || 0), 1);
+    return `
+      <div class="stat-card">
+        <h3>${esc(payload.stateName)} <small>${payload.totalCandidates != null ? `${payload.totalCandidates} filed candidates` : ''}</small></h3>
+        <div class="bar-rows">
+          ${top.map((c) => `
+            <a class="bar-row bar-row--link" href="#/candidate/${esc(c.id)}">
+              <div class="bar-label">
+                <span>${esc(c.name)} <em>${esc(c.party)}${c.office ? ` · ${esc(OFFICE_NAMES[c.office] || c.office)}` : ''}${c.district && Number(c.district) ? `-${Number(c.district)}` : ''}</em></span>
+                <span>${fmtMoney(c.receipts)}</span>
+              </div>
+              <div class="bar-track"><div class="bar-fill" data-w="${Math.round(((c.receipts || 0) / max) * 100)}"></div></div>
+            </a>`).join('')}
+        </div>
+        <p class="stat-note">${esc(payload.note || '')}</p>
+      </div>`;
+  };
 
   app.innerHTML = `
     <section class="section">
       <div class="section-head">
-        <h2>Turnout by election type</h2>
-        <span class="count">${entries.length} states</span>
+        <h2>Money in the ${esc(String(stats.cycle || ''))} races</h2>
+        <span class="count">${esc(stats.source || '')}</span>
       </div>
-      <p style="max-width:64ch;margin-bottom:1.5rem">The pattern holds everywhere: the closer an election is to your front door, the fewer people vote in it. Turnout figures below are share of registered voters, recent cycle averages.</p>
-      <div class="stats-grid">
-        ${entries.map(([code, s]) => `
-          <div class="stat-card">
-            <h3>${esc(s.state)} <small>${(s.registeredVoters / 1e6).toFixed(1)}M registered</small></h3>
-            <div class="bar-rows">
-              ${s.turnoutByType.map((t) => `
-                <div class="bar-row">
-                  <div class="bar-label"><span>${esc(t.type)}</span><span>${t.turnout}%</span></div>
-                  <div class="bar-track"><div class="bar-fill" data-w="${t.turnout}"></div></div>
-                </div>`).join('')}
-            </div>
-            <p class="stat-note">${esc(s.note)}</p>
-          </div>`).join('')}
+      <p style="max-width:64ch;margin-bottom:1.5rem">Follow the money: every federal candidate reports what they raise and spend to the FEC. Fundraising isn't destiny, but it is the clearest early signal of which races are seriously contested.</p>
+      <div class="stats-grid stats-grid--wide">
+        ${bars(stats)}
+        ${national && national.state !== stats.state ? bars(national) : ''}
       </div>
     </section>
   `;
 
-  // Animate bars after paint.
   requestAnimationFrame(() => {
     app.querySelectorAll('.bar-fill').forEach((el) => {
       el.style.width = `${el.dataset.w}%`;
     });
   });
+}
+
+async function viewSearch(params) {
+  const q = (params.get('q') || '').trim();
+  searchInput.value = q;
+
+  let results = [];
+  let error = null;
+  if (q) {
+    try {
+      results = await api.search(q);
+    } catch (err) {
+      error = err.message;
+    }
+  }
+
+  app.innerHTML = `
+    <section class="section">
+      <div class="section-head">
+        <h2>Candidate search</h2>
+        <span class="count">${q ? `${results.length} match${results.length === 1 ? '' : 'es'} for “${esc(q)}”` : ''}</span>
+      </div>
+      ${error ? noteBox(error) : ''}
+      ${!q ? '<div class="empty">Type a candidate name in the search box above — the search covers every filed federal candidate in all 50 states.</div>' : ''}
+      ${q && !error ? (results.length ? results.map((r) => `
+        <a class="cand-line" href="#/candidate/${esc(r.id)}">
+          <span class="line-oval" aria-hidden="true"></span>
+          <span class="cand-name">${esc(r.name)}
+            <small>${esc(OFFICE_NAMES[r.office] || r.officeFull || '')}${r.state ? ` · ${esc(areaName(r.state))}` : ''}${r.district && Number(r.district) ? ` District ${Number(r.district)}` : ''}${(r.electionYears || []).length ? ` · ${r.electionYears.slice(-1)[0]}` : ''}</small>
+          </span>
+          <span class="party party--${esc(r.party)}">${esc(PARTY_NAMES[r.party] || r.party)}</span>
+        </a>`).join('')
+      : '<div class="empty">No filed candidates match that name. Check the spelling — the index covers candidates who have filed with the FEC.</div>') : ''}
+    </section>
+  `;
 }
 
 /* ---------------- router ---------------- */
@@ -325,6 +547,7 @@ const routes = [
   { match: /^#\/election\/([\w-]+)/, view: (h, m) => viewElection(m[1]), route: 'home' },
   { match: /^#\/candidate\/([\w-]+)/, view: (h, m) => viewCandidate(m[1]), route: 'home' },
   { match: /^#\/data/, view: () => viewData(), route: 'data' },
+  { match: /^#\/search/, view: (h) => viewSearch(new URLSearchParams(h.split('?')[1] || '')), route: 'search' },
 ];
 
 async function render() {
@@ -341,7 +564,7 @@ async function render() {
     window.scrollTo({ top: 0 });
   } catch (err) {
     console.error(err);
-    app.innerHTML = '<div class="empty">Couldn\u2019t load this page. Check that the server is running, then reload.</div>';
+    app.innerHTML = `<div class="empty">Couldn’t load this page${err.message ? ` — ${esc(err.message)}` : ''}. Check that the server is running, then reload.</div>`;
   }
 }
 
@@ -354,15 +577,24 @@ async function init() {
     state.areas = [];
   }
 
+  if (!state.areas.some((a) => a.code === state.area) && state.areas.length) {
+    state.area = state.areas[0].code;
+  }
+
   areaSelect.innerHTML = state.areas
     .map((a) => `<option value="${esc(a.code)}" ${a.code === state.area ? 'selected' : ''}>${esc(a.name)}</option>`)
     .join('');
 
   areaSelect.addEventListener('change', () => {
-    state.area = areaSelect.value;
-    localStorage.setItem('pb-area', state.area);
+    setArea(areaSelect.value);
     if ((location.hash || '#/home').startsWith('#/home')) render();
     else location.hash = '#/home';
+  });
+
+  searchForm.addEventListener('submit', (e) => {
+    e.preventDefault();
+    const q = searchInput.value.trim();
+    if (q) location.hash = `#/search?q=${encodeURIComponent(q)}`;
   });
 
   window.addEventListener('hashchange', render);

@@ -36,10 +36,28 @@ router.get('/candidates/:id', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
-// GET /api/stats?state=GA — turnout + registration data for the data view
+// GET /api/stats?state=GA — campaign-finance snapshot for the data view
 router.get('/stats', async (req, res, next) => {
   try {
     res.json(await service.getStats(req.query.state));
+  } catch (err) { next(err); }
+});
+
+// GET /api/search?q=name — candidate search across all states (FEC-backed)
+router.get('/search', async (req, res) => {
+  try {
+    res.json(await service.searchCandidates(req.query.q || ''));
+  } catch (err) {
+    // Search is wholly dependent on the live FEC connection — report that
+    // plainly instead of a generic 500.
+    res.status(503).json({ error: 'Candidate search is unavailable — the live FEC data source could not be reached.' });
+  }
+});
+
+// GET /api/markets/national — balance-of-power prediction markets
+router.get('/markets/national', async (req, res, next) => {
+  try {
+    res.json(await service.getNationalMarkets());
   } catch (err) { next(err); }
 });
 

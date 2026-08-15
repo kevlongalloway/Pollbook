@@ -1,11 +1,12 @@
 {
   "name": "pollbook",
-  "version": "0.1.0",
-  "description": "Election awareness app — find every election in your area, from school board to the presidency.",
+  "version": "0.2.0",
+  "description": "Election awareness app — every election in all 50 states, with live candidates, odds, and policy positions.",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "dev": "node --watch server.js"
+    "dev": "node --watch server.js",
+    "test": "node test/unit.js"
   },
   "engines": {
     "node": ">=18"
