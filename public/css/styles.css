@@ -1091,6 +1091,53 @@ button.deep-link { cursor: pointer; font-family: var(--font-mono); }
 
 /* ---------- candidate Q&A (AI) ---------- */
 
+.qa-callout {
+  border: var(--rule);
+  background: var(--white);
+  margin-bottom: 2.5rem;
+  box-shadow: 6px 6px 0 var(--yellow);
+}
+
+.qa-callout-head {
+  background: var(--blue);
+  color: var(--white);
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.9rem clamp(1.25rem, 3vw, 2rem);
+  flex-wrap: wrap;
+}
+
+.qa-badge {
+  background: var(--yellow);
+  color: var(--ink);
+  font-family: var(--font-mono);
+  font-weight: 700;
+  font-size: 0.7rem;
+  letter-spacing: 0.12em;
+  padding: 0.25rem 0.5rem;
+}
+
+.qa-callout-head h2 {
+  font-family: var(--font-display);
+  font-weight: 900;
+  font-stretch: 110%;
+  font-size: clamp(1.15rem, 2.8vw, 1.55rem);
+  text-transform: uppercase;
+  letter-spacing: 0.01em;
+}
+
+.qa-callout-tag {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  opacity: 0.85;
+}
+
+.qa-callout-body { padding: clamp(1.25rem, 3vw, 1.75rem) clamp(1.25rem, 3vw, 2rem); }
+
 .qa-note {
   font-size: 0.85rem;
   color: #4A4F55;
