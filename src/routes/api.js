@@ -3,6 +3,18 @@ const service = require('../services/electionService');
 
 const router = express.Router();
 
+// GET /api/meta — which data provider is actually serving this instance.
+// The frontend banners loudly when it isn't live, so seed data can never be
+// mistaken for real filings.
+router.get('/meta', (req, res) => {
+  const provider = process.env.DATA_PROVIDER || 'live';
+  res.json({
+    provider,
+    live: provider === 'live',
+    fecKey: process.env.FEC_API_KEY ? 'configured' : 'DEMO_KEY',
+  });
+});
+
 // GET /api/areas — states + localities available for browsing
 router.get('/areas', async (req, res, next) => {
   try {

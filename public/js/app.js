@@ -11,6 +11,7 @@ const state = {
   area: localStorage.getItem('pb-area') || 'GA',
   areas: [],
   tracked: new Set(JSON.parse(localStorage.getItem('pb-tracked') || '[]')),
+  meta: { provider: 'live', live: true },
 };
 
 /* ---------------- api client ---------------- */
@@ -39,6 +40,7 @@ const api = {
   nationalMarkets: () => api.get('/markets/national'),
   committees: (q) => api.get(`/committees?q=${encodeURIComponent(q)}`),
   committee: (id) => api.get(`/committees/${id}`),
+  meta: () => api.get('/meta'),
 };
 
 /* ---------------- helpers ---------------- */
@@ -165,32 +167,30 @@ const fundingSection = (c) => {
   ].filter(([, v]) => v != null && fin.receipts > 0);
   const support = f.independent?.support || [];
   const oppose = f.independent?.oppose || [];
-  const hasAnything = mix.length || (f.topPacs || []).length || support.length || oppose.length;
-  if (!hasAnything && c.sources?.funding !== 'error') return '';
+  const employers = f.employers || [];
+  const earmarked = f.earmarked || [];
+  const sizes = f.donorSizes || [];
+  const hasAnything = mix.length || (f.topPacs || []).length || support.length
+    || oppose.length || employers.length || earmarked.length;
+  if (!hasAnything && !c.sources?.funding) return '';
+
+  const smallDollar = sizes.find((s) => s.size === 0);
+  const sizeTotal = sizes.reduce((sum, s) => sum + s.total, 0);
 
   return `
     <section class="section">
       <div class="section-head"><h2>Who funds them</h2><span class="count">${c.sources?.mock ? '' : 'FEC filings, fetched live'}</span></div>
-      ${c.sources?.funding === 'error' ? noteBox('Live funding data (FEC) is unreachable right now — this section may be incomplete.') : ''}
+      ${c.sources?.funding === 'partial' ? noteBox('Some funding data could not be loaded from the FEC just now — panels below may be incomplete.') : ''}
 
       ${mix.length ? `
         <div class="finance-grid">
           ${mix.map(([label, v]) => `
             <div class="finance-card"><dt>${esc(label)}</dt><dd>${fmtMoney(v)}</dd>
               <small>${Math.round((v / fin.receipts) * 100)}% of money raised</small></div>`).join('')}
+          ${smallDollar && sizeTotal ? `
+            <div class="finance-card"><dt>Small donors</dt><dd>${Math.round((smallDollar.total / sizeTotal) * 100)}%</dd>
+              <small>Gave under $200 each</small></div>` : ''}
         </div>` : ''}
-
-      ${(f.topPacs || []).length ? `
-        <div class="section-sub"><h3>Top PAC &amp; committee contributions</h3></div>
-        <div class="money-list">
-          ${f.topPacs.map((p) => moneyLine({
-            href: committeeHref(p.committeeId),
-            name: p.name,
-            meta: p.count > 1 ? `${p.count} contributions` : '',
-            amount: p.total,
-          })).join('')}
-        </div>
-        <p class="attribution" style="padding:0.5rem 0 0">Largest itemized contributions from PACs, party committees, and other committees to the campaign. Groups like AIPAC also route money as earmarked individual donations, which appear as individual money — follow the committee links for the full picture.</p>` : ''}
 
       ${support.length || oppose.length ? `
         <div class="section-sub"><h3>Outside spending about this candidate</h3></div>
@@ -202,7 +202,37 @@ const fundingSection = (c) => {
             href: committeeHref(r.committeeId), name: r.committee, amount: r.total, tag: 'Against',
           })).join('')}
         </div>
-        <p class="attribution" style="padding:0.5rem 0 0">Independent expenditures by super PACs and outside groups. This money is spent for or against the candidate without going to (or being coordinated with) the campaign.</p>` : ''}
+        <p class="attribution" style="padding:0.5rem 0 0">Independent expenditures by super PACs and outside groups — unlimited, and spent for or against the candidate without going to (or being coordinated with) the campaign. This is where the largest outside money shows up.</p>` : ''}
+
+      ${earmarked.length ? `
+        <div class="section-sub"><h3>Bundled through a conduit</h3></div>
+        <div class="money-list">
+          ${earmarked.map((e) => moneyLine({
+            href: null, name: e.name, meta: `${e.count} earmarked donation${e.count === 1 ? '' : 's'}`, amount: e.total,
+          })).join('')}
+        </div>
+        <p class="attribution" style="padding:0.5rem 0 0">Individual donations earmarked through an organization acting as a conduit. This is how groups such as AIPAC move most of their money — it never appears as a PAC check, so a PAC-only view misses it.</p>` : ''}
+
+      ${employers.length ? `
+        <div class="section-sub"><h3>Top donor employers &amp; affiliations</h3></div>
+        <div class="money-list">
+          ${employers.map((e) => moneyLine({
+            href: null, name: e.employer, meta: e.count ? `${e.count} donations` : '', amount: e.total,
+          })).join('')}
+        </div>
+        <p class="attribution" style="padding:0.5rem 0 0">Individual contributions grouped by the donor's reported employer. The organization itself isn't giving — its employees and members are — but this is the clearest signal of which industries and institutions are behind a campaign.</p>` : ''}
+
+      ${(f.topPacs || []).length ? `
+        <div class="section-sub"><h3>PAC &amp; committee contributions</h3></div>
+        <div class="money-list">
+          ${f.topPacs.map((p) => moneyLine({
+            href: committeeHref(p.committeeId),
+            name: p.name,
+            meta: p.count > 1 ? `${p.count} contributions` : '',
+            amount: p.total,
+          })).join('')}
+        </div>
+        <p class="attribution" style="padding:0.5rem 0 0">Direct contributions from PACs and party committees, totalled across the cycle. Federal law caps these at $5,000 per election, so the amounts are small and similar across candidates by design — the panels above carry far more signal.</p>` : ''}
     </section>`;
 };
 
@@ -624,9 +654,9 @@ async function viewPacs(params) {
     <section class="section">
       <div class="section-head">
         <h2>PAC &amp; outside-money tracker</h2>
-        <span class="count">${q ? `${data.results.length} committee${data.results.length === 1 ? '' : 's'} for “${esc(q)}”` : 'FEC filings, fetched live'}</span>
+        <span class="count">${q ? `${data.results.length} committee${data.results.length === 1 ? '' : 's'} for “${esc(q)}”` : (state.meta.live ? 'FEC filings, fetched live' : 'Sample data')}</span>
       </div>
-      <p style="max-width:66ch;margin-bottom:1rem">Search any PAC, super PAC, or party committee to see who they fund — and who they spend against. Money reaches candidates two ways: <strong>direct contributions</strong> to the campaign, and <strong>independent expenditures</strong> (super-PAC ads for or against a candidate that never touch the campaign's books). Both come straight from FEC filings.</p>
+      <p style="max-width:70ch;margin-bottom:1rem">Search any PAC, super PAC, or party committee to see who they fund — and who they spend against. Organizational money reaches a candidate three ways: <strong>direct contributions</strong> (capped at $5,000 per election, so they're small); <strong>independent expenditures</strong> (unlimited super-PAC spending for or against a candidate, never touching the campaign's books); and <strong>bundled donations</strong> earmarked through the organization as a conduit — which is how groups like AIPAC move most of their money. All three come straight from FEC filings.</p>
 
       <form id="pac-form" class="browse-controls" role="search">
         <input id="pac-input" type="search" value="${esc(q)}" placeholder="Search committees — try AIPAC…" aria-label="Search PACs and committees" style="flex:2;min-width:220px" />
@@ -750,6 +780,20 @@ const routes = [
   { match: /^#\/committee\/([\w-]+)/, view: (h, m) => viewCommittee(m[1]), route: 'pacs' },
 ];
 
+/** Loud, permanent warning whenever the server isn't serving real data. */
+function renderModeBanner() {
+  const existing = document.getElementById('mode-banner');
+  if (state.meta.live) return existing?.remove();
+  if (existing) return;
+  const el = document.createElement('div');
+  el.id = 'mode-banner';
+  el.className = 'mode-banner';
+  el.innerHTML = `<strong>Sample data — not real filings.</strong> This server is running with
+    <code>DATA_PROVIDER=${esc(state.meta.provider)}</code>, so every candidate, dollar figure, and PAC on
+    this page is fictional. Set <code>DATA_PROVIDER=live</code> (or remove the variable) to pull live FEC data.`;
+  document.querySelector('.rulebar').insertAdjacentElement('afterend', el);
+}
+
 async function render() {
   const hash = location.hash || '#/home';
   const found = routes.find((r) => r.match.test(hash)) || routes[0];
@@ -771,11 +815,13 @@ async function render() {
 /* ---------------- boot ---------------- */
 
 async function init() {
-  try {
-    state.areas = await api.areas();
-  } catch {
-    state.areas = [];
-  }
+  const [areas, meta] = await Promise.all([
+    api.areas().catch(() => []),
+    api.meta().catch(() => ({ provider: 'live', live: true })),
+  ]);
+  state.areas = areas;
+  state.meta = meta;
+  renderModeBanner();
 
   if (!state.areas.some((a) => a.code === state.area) && state.areas.length) {
     state.area = state.areas[0].code;

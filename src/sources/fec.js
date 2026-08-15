@@ -11,14 +11,16 @@
 const { fetchJson } = require('../lib/http');
 const { cached } = require('../lib/cache');
 
-const BASE = 'https://api.open.fec.gov/v1';
+// FEC_API_BASE is overridable so the pagination logic can be exercised
+// against a local stub in tests.
+const BASE = () => process.env.FEC_API_BASE || 'https://api.open.fec.gov/v1';
 const KEY = () => process.env.FEC_API_KEY || 'DEMO_KEY';
 
 const HOUR = 3600 * 1000;
 
 function url(path, params = {}) {
   const q = new URLSearchParams({ api_key: KEY(), ...params });
-  return `${BASE}${path}?${q}`;
+  return `${BASE()}${path}?${q}`;
 }
 
 async function fetchAllPages(path, params, maxPages = 3) {
@@ -29,6 +31,31 @@ async function fetchAllPages(path, params, maxPages = 3) {
     if (!data.pagination || page >= (data.pagination.pages || 1)) break;
   }
   return results;
+}
+
+/**
+ * Itemized Schedule A receipts, walked with keyset pagination.
+ *
+ * The FEC rejects deep `page=N` paging on the itemized schedules — you must
+ * pass back the `pagination.last_indexes` object from the previous response.
+ * Aggregating a single page (as an earlier version did) produces a
+ * meaningless slice: PAC contributions cluster at the legal maximum, so the
+ * "top 100 by amount" is an arbitrary subset of same-sized checks.
+ */
+async function fetchScheduleA(params, { maxPages = 12, perPage = 100 } = {}) {
+  const rows = [];
+  let cursor = {};
+  for (let i = 0; i < maxPages; i++) {
+    const data = await fetchJson(url('/schedules/schedule_a/', {
+      ...params, per_page: perPage, ...cursor,
+    }), { timeoutMs: 15000 });
+    const results = data.results || [];
+    rows.push(...results);
+    const next = data.pagination && data.pagination.last_indexes;
+    if (!next || results.length < perPage) break;
+    cursor = next;
+  }
+  return rows;
 }
 
 /* ---------------- normalizers ---------------- */
@@ -307,21 +334,116 @@ async function principalCommitteeId(candidateId) {
 }
 
 /**
- * Top PACs/committees giving directly to a candidate's campaign
- * (itemized Schedule A receipts from committees, top slice by amount).
+ * Every PAC/committee contribution to a candidate's campaign, fully
+ * paginated and aggregated per contributing committee.
  */
 async function candidatePacContributions(candidateId, cycle) {
   return cached(`fec:pacs-cand:${candidateId}:${cycle}`, 6 * HOUR, async () => {
     const committeeId = await principalCommitteeId(candidateId);
     if (!committeeId) return [];
-    const data = await fetchJson(url('/schedules/schedule_a/', {
+    const rows = await fetchScheduleA({
       committee_id: committeeId,
       two_year_transaction_period: cycle,
       is_individual: 'false',
       sort: '-contribution_receipt_amount',
-      per_page: 100,
+    });
+    return aggregateContributors(rows, { limit: 15 });
+  });
+}
+
+/**
+ * Money grouped by the donor's employer — the FEC's own aggregate endpoint.
+ *
+ * This is the highest-signal "which organizations are behind this candidate"
+ * view available without a paid data vendor: PAC checks are capped at $5k and
+ * look identical across candidates, but employer totals (individuals giving
+ * as employees/members of an organization) vary enormously and are exactly
+ * what "industry X funds this candidate" reporting is built on.
+ */
+async function candidateEmployerMoney(candidateId, cycle) {
+  return cached(`fec:employers:${candidateId}:${cycle}`, 6 * HOUR, async () => {
+    const committeeId = await principalCommitteeId(candidateId);
+    if (!committeeId) return [];
+    const data = await fetchJson(url('/schedules/schedule_a/by_employer/', {
+      committee_id: committeeId, cycle, sort: '-total', per_page: 15,
     }));
-    return aggregateContributors(data.results || []);
+    return (data.results || [])
+      .filter((r) => r.employer && !/^(none|n\/a|not employed|retired|self|self employed|self-employed|information requested)$/i.test(r.employer.trim()))
+      .map((r) => ({ employer: titleCase(r.employer), total: Math.round(r.total || 0), count: r.count || null }))
+      .filter((r) => r.total > 0)
+      .slice(0, 10);
+  });
+}
+
+/** Contribution-size profile: small-dollar base vs. max-out donors. */
+async function candidateDonorSizes(candidateId, cycle) {
+  return cached(`fec:sizes:${candidateId}:${cycle}`, 6 * HOUR, async () => {
+    const committeeId = await principalCommitteeId(candidateId);
+    if (!committeeId) return [];
+    const data = await fetchJson(url('/schedules/schedule_a/by_size/', {
+      committee_id: committeeId, cycle,
+    }));
+    const LABELS = {
+      0: 'Under $200', 200: '$200–$499', 500: '$500–$999',
+      1000: '$1,000–$1,999', 2000: '$2,000 and up',
+    };
+    return (data.results || [])
+      .map((r) => ({ size: r.size, label: LABELS[r.size] || `$${r.size}+`, total: Math.round(r.total || 0) }))
+      .filter((r) => r.total > 0)
+      .sort((a, b) => a.size - b.size);
+  });
+}
+
+/**
+ * Aggregate earmarked/bundled contributions by the conduit that routed them
+ * (pure — unit tested).
+ *
+ * This is how organizations like AIPAC move most of their money: not as a
+ * PAC check, but by bundling individual donations earmarked through the
+ * organization as a conduit. On the recipient's filings these arrive as
+ * individual contributions carrying the conduit's name in the memo text or
+ * `donor_committee_name`, so a plain PAC-contribution view misses them
+ * entirely.
+ */
+function aggregateEarmarks(rows, { limit = 10 } = {}) {
+  const byConduit = new Map();
+  for (const r of rows) {
+    const amount = r.contribution_receipt_amount;
+    if (!(amount > 0)) continue;
+    const memo = String(r.memo_text || '');
+    const viaCommittee = r.donor_committee_name ? String(r.donor_committee_name) : '';
+    // Only count rows that actually name a conduit.
+    let conduit = viaCommittee;
+    if (!conduit && /earmark|conduit|bundl/i.test(memo)) {
+      const m = memo.match(/(?:earmarked|conduit|bundled)\s*(?:through|via|by)?\s*[:\-]?\s*(.+)$/i);
+      conduit = m ? m[1] : '';
+    }
+    conduit = conduit.replace(/\((?:id|c\d+)[^)]*\)/ig, '').replace(/[.\s]+$/, '').trim();
+    if (conduit.length < 3) continue;
+    const key = conduit.toLowerCase();
+    const entry = byConduit.get(key) || { name: titleCase(conduit), total: 0, count: 0 };
+    entry.total += amount;
+    entry.count += 1;
+    byConduit.set(key, entry);
+  }
+  return [...byConduit.values()]
+    .map((e) => ({ ...e, total: Math.round(e.total) }))
+    .sort((a, b) => b.total - a.total)
+    .slice(0, limit);
+}
+
+/** Bundled/earmarked money reaching a candidate, grouped by conduit. */
+async function candidateEarmarked(candidateId, cycle) {
+  return cached(`fec:earmark:${candidateId}:${cycle}`, 6 * HOUR, async () => {
+    const committeeId = await principalCommitteeId(candidateId);
+    if (!committeeId) return [];
+    const rows = await fetchScheduleA({
+      committee_id: committeeId,
+      two_year_transaction_period: cycle,
+      is_individual: 'true',
+      sort: '-contribution_receipt_amount',
+    }, { maxPages: 8 });
+    return aggregateEarmarks(rows);
   });
 }
 
@@ -332,13 +454,12 @@ async function candidatePacContributions(candidateId, cycle) {
  */
 async function committeeTopRecipients(committeeName, cycle) {
   return cached(`fec:recips:${committeeName.toLowerCase()}:${cycle}`, 6 * HOUR, async () => {
-    const data = await fetchJson(url('/schedules/schedule_a/', {
+    const rows = await fetchScheduleA({
       contributor_name: committeeName,
       two_year_transaction_period: cycle,
       sort: '-contribution_receipt_amount',
-      per_page: 100,
-    }));
-    return aggregateRecipients(data.results || []);
+    }, { maxPages: 8 });
+    return aggregateRecipients(rows);
   });
 }
 
@@ -378,7 +499,13 @@ module.exports = {
   candidateIndependentSpending,
   committeeIndependentSpending,
   candidatePacContributions,
+  candidateEmployerMoney,
+  candidateDonorSizes,
+  candidateEarmarked,
   committeeTopRecipients,
   aggregateContributors,
   aggregateRecipients,
+  aggregateEarmarks,
+  // Exposed for the pagination test harness.
+  __fetchScheduleA: fetchScheduleA,
 };
