@@ -53,6 +53,13 @@ The PAC tracker searches any committee and shows who it funds and opposes. Commi
 | `DATA_PROVIDER` | `live` | `live`, `mock` (offline fictional seed data), or `google-civic` (stub). **If your deploy sets this to `mock`, unset it** — every figure will be fictional. |
 | `FEC_API_KEY` | `DEMO_KEY` | OpenFEC key — get one free at api.open.fec.gov/developers. Strongly recommended: the funding panels make several FEC calls per candidate page, and `DEMO_KEY` allows only 30/hour across all users. |
 | `FEC_API_BASE` | OpenFEC v1 | Override the API base — used by `test/pagination.js` to run against a stub. |
+| `GROQ_API_KEY` | none | Enables the "Ask about this candidate" AI panel. Free key at [console.groq.com/keys](https://console.groq.com/keys). Without it, that panel returns a plain error and the rest of the app is unaffected. |
+| `GROQ_MODEL` | `llama-3.3-70b-versatile` | Groq model used for candidate Q&A. |
+| `GROQ_API_BASE` | Groq's OpenAI-compatible endpoint | Override the API base (e.g. for testing against a stub). |
+
+### Candidate Q&A (AI)
+
+Every candidate page has an "Ask about this candidate" panel, backed by [Groq](https://groq.com) (free-tier chat completions). It's grounded in that candidate's Pollbook profile — FEC filings, Wikipedia bio/positions, recent headlines — and a system prompt that keeps it strictly nonpartisan and scoped to U.S. elections: any question outside U.S. elections/candidates gets a fixed refusal ("I only give information on United States elections and their candidates.") instead of an answer. Conversation history is kept in the browser's `localStorage` only (`pb-ai-<candidateId>`) — nothing is stored server-side, and there's a "Clear conversation" button per candidate.
 
 ## Architecture
 
@@ -67,6 +74,8 @@ src/data/usStates.js               50 states + DC: primaries, 2026 races, regist
 src/data/committeeAliases.js       Publicly-reported PAC affiliations (AIPAC ↔ United Democracy Project)
 src/lib/calendar.js                Statutory election-date math
 src/lib/cache.js                   TTL cache, stale-on-error
+src/lib/groq.js                    Groq chat-completions client (GROQ_API_KEY)
+src/lib/candidateQa.js             Candidate Q&A: grounds Groq in the candidate profile, enforces scope
 src/sources/fec.js                 FEC candidates, finance, search
 src/sources/markets.js             PredictIt odds + candidate matching
 src/sources/wikipedia.js           Bio + political-positions extraction
@@ -82,6 +91,7 @@ public/                            Vanilla frontend (hash-routed SPA)
 | `GET /api/elections?state=GA&scope=state` | Upcoming election summaries |
 | `GET /api/elections/:id` | Detail with races, candidates, fundraising, market odds |
 | `GET /api/candidates/:id` | Bio, policy positions, finance, news, odds, links |
+| `POST /api/candidates/:id/ask` | AI answer to a question about this candidate (Groq, needs `GROQ_API_KEY`). Body: `{ question, history }`; history stays client-side. |
 | `GET /api/stats?state=GA` | Campaign-finance snapshot (top fundraisers) |
 | `GET /api/search?q=name` | Candidate search across all filed federal candidates |
 | `GET /api/committees?q=aipac` | PAC/super-PAC search (alias-aware: AIPAC also finds United Democracy Project) |
