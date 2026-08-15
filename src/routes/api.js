@@ -1,9 +1,26 @@
 const express = require('express');
 const service = require('../services/electionService');
 const { askAboutCandidate } = require('../lib/candidateQa');
+const { askAboutBill } = require('../lib/billQa');
 const webSearch = require('../sources/webSearch');
+const { BILL_TYPES } = require('../sources/congress');
 
 const router = express.Router();
+
+/**
+ * Bill coordinates arrive as three path segments. Validating them here keeps
+ * an arbitrary string out of the upstream URL — the type must be one Congress
+ * recognises and the number must be digits.
+ */
+function billParams(req) {
+  const congress = Number(req.params.congress);
+  const type = String(req.params.type || '').toLowerCase();
+  const number = String(req.params.number || '');
+  if (!Number.isInteger(congress) || congress < 1 || congress > 200) return null;
+  if (!BILL_TYPES.includes(type)) return null;
+  if (!/^\d{1,5}$/.test(number)) return null;
+  return { congress, type, number };
+}
 
 // GET /api/meta — which data provider is actually serving this instance.
 // The frontend banners loudly when it isn't live, so seed data can never be
@@ -107,6 +124,52 @@ router.get('/committees/:id', async (req, res, next) => {
     const committee = await service.getCommitteeById(req.params.id);
     if (!committee) return res.status(404).json({ error: 'Committee not found' });
     res.json(committee);
+  } catch (err) { next(err); }
+});
+
+// GET /api/bills?q=... — election-related bills before Congress, or a search.
+// A query that parses as a bill number ("HR 22") resolves that bill directly.
+router.get('/bills', async (req, res) => {
+  try {
+    res.json(await service.getBills({ q: req.query.q || '' }));
+  } catch (err) {
+    res.status(503).json({ error: `Live legislative data (Congress.gov) is unavailable right now — ${err.message}` });
+  }
+});
+
+// GET /api/bills/:congress/:type/:number — full bill detail
+router.get('/bills/:congress/:type/:number', async (req, res, next) => {
+  try {
+    const p = billParams(req);
+    if (!p) return res.status(400).json({ error: 'Not a valid bill reference.' });
+    const bill = await service.getBillById(p.congress, p.type, p.number);
+    if (!bill) return res.status(404).json({ error: 'Bill not found' });
+    res.json(bill);
+  } catch (err) { next(err); }
+});
+
+// POST /api/bills/:congress/:type/:number/ask — AI answer about this bill.
+// Scoped to U.S. legislation and elections by the system prompt in billQa;
+// history comes from (and is stored only in) the caller's browser.
+router.post('/bills/:congress/:type/:number/ask', async (req, res, next) => {
+  try {
+    const { question, history } = req.body || {};
+    if (typeof question !== 'string' || !question.trim()) {
+      return res.status(400).json({ error: 'A question is required.' });
+    }
+    if (question.length > 4000) {
+      return res.status(400).json({ error: 'Question is too long.' });
+    }
+
+    const p = billParams(req);
+    if (!p) return res.status(400).json({ error: 'Not a valid bill reference.' });
+    const bill = await service.getBillById(p.congress, p.type, p.number);
+    if (!bill) return res.status(404).json({ error: 'Bill not found' });
+
+    const { answer, sources } = await askAboutBill(
+      bill, question.trim(), Array.isArray(history) ? history : []
+    );
+    res.json({ answer, sources });
   } catch (err) { next(err); }
 });
 

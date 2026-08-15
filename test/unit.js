@@ -224,4 +224,116 @@ test('PAC aggregation totals repeated max-out checks across the cycle', () => {
   assert.strictEqual(agg[0].count, 4);
 });
 
+/* ---------------- congress numbering ---------------- */
+
+test('congress number advances every odd January', () => {
+  assert.strictEqual(calendar.currentCongress('2025-06-01'), 119);
+  assert.strictEqual(calendar.currentCongress('2026-08-15'), 119);
+  assert.strictEqual(calendar.currentCongress('2027-06-01'), 120);
+  assert.strictEqual(calendar.currentCongress('2029-06-01'), 121);
+  // A new Congress convenes on January 3, so the first two days of an odd
+  // year still belong to the outgoing one.
+  assert.strictEqual(calendar.currentCongress('2027-01-01'), 119);
+  assert.strictEqual(calendar.currentCongress('2027-01-03'), 120);
+});
+
+/* ---------------- money-flow model ---------------- */
+
+const { buildMoneyFlow } = require('../src/lib/moneyFlow');
+
+const FINANCE = {
+  cycle: 2026, coverageEnd: '2026-06-30',
+  receipts: 1000000, disbursements: 600000, cashOnHand: 400000,
+  fromIndividuals: 700000, fromPacs: 50000, fromParty: 100000,
+};
+
+const FUNDING = {
+  donorSizes: [{ size: 0, total: 200000 }, { size: 2000, total: 500000 }],
+  earmarked: [{ name: 'Advocacy Network', total: 150000, count: 210 }],
+  independent: {
+    support: [{ committee: 'Priorities PAC', committeeId: 'C1', total: 2000000 }],
+    oppose: [{ committee: 'Values Fund', committeeId: 'C2', total: 500000 }],
+  },
+};
+
+test('inflow bands reconcile to the reported receipts total', () => {
+  const mf = buildMoneyFlow({ finance: FINANCE, funding: FUNDING });
+  const total = mf.campaign.inflows.reduce((t, f) => t + f.amount, 0);
+  assert.strictEqual(total, FINANCE.receipts, 'bands must sum to what the campaign says it raised');
+  assert.strictEqual(mf.campaign.raised, 1000000);
+  // 1,000,000 - (700k + 50k + 100k) lands in an explicit remainder rather
+  // than silently disappearing.
+  const other = mf.campaign.inflows.find((f) => f.key === 'other');
+  assert.strictEqual(other.amount, 150000);
+});
+
+test('conduit money annotates the individual bands, never adds a band', () => {
+  const mf = buildMoneyFlow({ finance: FINANCE, funding: FUNDING });
+  // The bug this guards: bundled money arrives *as* individual contributions,
+  // so adding it as its own inflow would double-count it against the total.
+  assert.ok(!mf.campaign.inflows.some((f) => /conduit|earmark|bundl/i.test(f.key + f.label)));
+  assert.strictEqual(mf.campaign.inflows.reduce((t, f) => t + f.amount, 0), FINANCE.receipts);
+  assert.strictEqual(mf.campaign.conduits.total, 150000);
+  // 150k bundled out of 700k individual.
+  assert.ok(Math.abs(mf.campaign.conduits.shareOfIndividuals - 150000 / 700000) < 1e-9);
+});
+
+test('outside spending stays out of the campaign total', () => {
+  const mf = buildMoneyFlow({ finance: FINANCE, funding: FUNDING });
+  assert.strictEqual(mf.outside.total, 2500000);
+  assert.strictEqual(mf.outside.support.total, 2000000);
+  assert.strictEqual(mf.outside.oppose.total, 500000);
+  // Independent expenditures never touch the campaign's books.
+  assert.strictEqual(mf.campaign.raised, 1000000);
+  // One ruler across both tracks, so the taller stack really is the bigger
+  // pile of money.
+  assert.strictEqual(mf.scale, 2500000);
+});
+
+test('small-donor split is dropped when the aggregates do not reconcile', () => {
+  // The FEC's donor-size aggregate covers a different window than the
+  // individual total, so it can exceed it. Splitting anyway would draw a
+  // sub-band wider than its parent.
+  const mf = buildMoneyFlow({
+    finance: { ...FINANCE, fromIndividuals: 100000 },
+    funding: { ...FUNDING, donorSizes: [{ size: 0, total: 900000 }] },
+  });
+  const keys = mf.campaign.inflows.map((f) => f.key);
+  assert.ok(keys.includes('individuals'), 'should fall back to one undivided band');
+  assert.ok(!keys.includes('small'));
+  assert.ok(mf.caveats.some((c) => /small-donor/i.test(c)), 'the fallback must be explained');
+});
+
+test('shares are computed against the drawn total', () => {
+  const mf = buildMoneyFlow({ finance: FINANCE, funding: FUNDING });
+  const sum = mf.campaign.inflows.reduce((t, f) => t + f.share, 0);
+  assert.ok(Math.abs(sum - 1) < 1e-9, 'shares should sum to 1');
+});
+
+test('nothing to draw returns null rather than an empty chart', () => {
+  assert.strictEqual(buildMoneyFlow({}), null);
+  assert.strictEqual(buildMoneyFlow({ finance: { receipts: 0 }, funding: {} }), null);
+  assert.strictEqual(buildMoneyFlow({ finance: { receipts: null } }), null);
+});
+
+test('outside spending alone still draws', () => {
+  const mf = buildMoneyFlow({
+    finance: null,
+    funding: { independent: { support: [{ committee: 'X', total: 90000 }], oppose: [] } },
+  });
+  assert.ok(mf, 'a candidate with no filings but real outside spending must still render');
+  assert.strictEqual(mf.outside.total, 90000);
+  assert.deepStrictEqual(mf.campaign.inflows, []);
+});
+
+test('negative and missing aggregates are skipped, not drawn', () => {
+  const mf = buildMoneyFlow({
+    finance: { receipts: 500000, fromIndividuals: 500000, fromPacs: -2000, fromParty: null },
+    funding: {},
+  });
+  assert.deepStrictEqual(mf.campaign.inflows.map((f) => f.key), ['individuals']);
+  assert.strictEqual(mf.campaign.conduits, null);
+  assert.strictEqual(mf.outside, null);
+});
+
 console.log(`${passed} tests passed${process.exitCode ? ' (with failures)' : ''}`);

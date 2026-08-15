@@ -29,6 +29,20 @@ function currentCycle(today = todayIso()) {
   return year;
 }
 
+/**
+ * The Congress seated on a given date.
+ *
+ * A new Congress convenes on January 3 of each odd-numbered year (20th
+ * Amendment), so the 1st Congress began in 1789 and the number advances every
+ * two years. Derived rather than stored, for the same reason election dates
+ * are: it stays correct after the current cycle rolls over.
+ */
+function currentCongress(today = todayIso()) {
+  const year = Number(today.slice(0, 4));
+  const seatedYear = year % 2 === 1 && today < `${year}-01-03` ? year - 1 : year;
+  return Math.floor((seatedYear - 1789) / 2) + 1;
+}
+
 function describeGeneral(st, cycle) {
   const parts = ['All of the state’s U.S. House seats'];
   if (st.senate2026 && cycle === 2026) parts.push('a U.S. Senate seat');
@@ -103,6 +117,7 @@ function allElections(opts = {}) {
 module.exports = {
   generalElectionDate,
   currentCycle,
+  currentCongress,
   stateElections,
   nationalElection,
   allElections,

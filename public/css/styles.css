@@ -1279,9 +1279,215 @@ button.deep-link { cursor: pointer; font-family: var(--font-mono); }
 
 .qa-actions { margin-top: 0.6rem; }
 
+/* ---------- money flow diagram ---------- */
+
+/* The SVG carries its own geometry; this only has to give it room and keep
+   the type in the diagram consistent with the rest of the system. */
+.mf-wrap {
+  border: var(--rule-thin);
+  background: var(--white);
+  padding: 1.25rem 1rem;
+  overflow-x: auto;
+}
+
+.mf-svg {
+  display: block;
+  width: 100%;
+  min-width: 520px; /* below this the labels collide; the wrapper scrolls */
+  height: auto;
+}
+
+.mf-label {
+  font-family: var(--font-body);
+  font-size: 12px;
+  font-weight: 600;
+  fill: var(--ink);
+}
+
+.mf-amt {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  fill: #4A4F55;
+}
+
+.mf-node {
+  font-family: var(--font-display);
+  font-size: 13px;
+  font-weight: 800;
+  fill: var(--ink);
+}
+
+.mf-track-label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  fill: #4A4F55;
+}
+
+.mf-legend {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  margin-top: 1rem;
+  max-width: 74ch;
+}
+
+.mf-key {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.6rem;
+  align-items: start;
+  font-size: 0.86rem;
+  line-height: 1.45;
+  color: #33383D;
+}
+
+.mf-key--caveat { color: #6A4A00; }
+
+.mf-swatch {
+  width: 1.1rem;
+  height: 1.1rem;
+  border: 1.5px solid var(--ink);
+  margin-top: 0.15em;
+}
+
+.mf-swatch--hatch {
+  background: repeating-linear-gradient(45deg, var(--white) 0 3px, var(--ink) 3px 5px);
+}
+
+.mf-swatch--rule { background: var(--white); border-style: dashed; }
+.mf-swatch--ink { background: var(--ink); }
+
+/* ---------- bills ---------- */
+
+.bill-list { border-top: var(--rule-thin); }
+
+.bill-line {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 1rem;
+  align-items: center;
+  padding: 0.85rem 0.25rem;
+  border-bottom: var(--rule-thin);
+  text-decoration: none;
+}
+
+.bill-line:hover .bill-title { color: var(--blue); }
+
+.bill-num {
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  font-weight: 600;
+  min-width: 6.5rem;
+  color: var(--blue);
+}
+
+.bill-main { display: flex; flex-direction: column; gap: 0.15rem; min-width: 0; }
+.bill-title { font-weight: 600; }
+
+.bill-meta {
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  color: #4A4F55;
+}
+
+.tag--stage-law { background: var(--ink); color: var(--white); }
+.tag--stage-both,
+.tag--stage-president { background: var(--blue); color: var(--white); border-color: var(--blue); }
+.tag--stage-one-chamber { background: var(--yellow); }
+.tag--stage-vetoed { background: var(--white); color: #B3231F; border-color: #B3231F; }
+.tag--stage-committee,
+.tag--stage-introduced { background: var(--white); color: #4A4F55; }
+
+/* Progress rail on a bill page. */
+.stage-rail {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
+  gap: 0.25rem;
+  padding: 1rem 1.5rem 0.25rem;
+}
+
+.stage-step {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  position: relative;
+}
+
+/* The connector runs behind the dots, so a completed step reads as a filled
+   run rather than a row of unrelated markers. */
+.stage-step::before {
+  content: '';
+  position: absolute;
+  top: 0.42rem;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: var(--concrete);
+}
+
+.stage-step--done::before { background: var(--blue); }
+
+.stage-dot {
+  width: 0.9rem;
+  height: 0.9rem;
+  border: 2.5px solid var(--concrete);
+  border-radius: 50%;
+  background: var(--paper);
+  position: relative;
+  z-index: 1;
+}
+
+.stage-step--done .stage-dot { border-color: var(--blue); background: var(--blue); }
+.stage-step--now .stage-dot { border-color: var(--blue); background: var(--yellow); }
+
+.stage-step small {
+  font-family: var(--font-mono);
+  font-size: 0.62rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: #4A4F55;
+}
+
+.stage-step--now small { color: var(--ink); font-weight: 600; }
+
+.bill-summary { max-width: 72ch; }
+.bill-summary p + p { margin-top: 0.85rem; }
+
+.action-list { border-top: var(--rule-thin); }
+
+.action-line {
+  display: grid;
+  grid-template-columns: 7.5rem 1fr;
+  gap: 1rem;
+  padding: 0.7rem 0.25rem;
+  border-bottom: var(--rule-thin);
+  align-items: baseline;
+}
+
+.action-date {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  color: #4A4F55;
+  white-space: nowrap;
+}
+
+.action-text small {
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  color: #4A4F55;
+}
+
 /* ---------- responsive ---------- */
 
 @media (max-width: 720px) {
+  .bill-line { grid-template-columns: auto 1fr; }
+  .bill-line .tag { display: none; }
+  .action-line { grid-template-columns: 1fr; gap: 0.2rem; }
+  .stage-rail { padding: 1rem 0 0.25rem; }
+  .stage-step small { font-size: 0.55rem; }
   .masthead-area { margin-left: 0; width: 100%; }
   .masthead-search { margin-left: 0; width: 100%; }
   .masthead-search input { flex: 1; width: auto; }
