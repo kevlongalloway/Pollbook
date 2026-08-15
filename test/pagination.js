@@ -8,6 +8,10 @@
  * identically-sized max-out checks. Run: npm run test:pagination
  */
 
+// Hermetic: never read or write the on-disk cache snapshot from a test run.
+process.env.CACHE_PERSIST = '0';
+
+
 const assert = require('node:assert');
 const http = require('node:http');
 

@@ -7,7 +7,17 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 const INDEX_FILE = path.join(__dirname, 'public', 'index.html');
 
-app.use(express.json());
+// Render (and most hosts) terminate TLS at a proxy, so the caller's address
+// only survives in X-Forwarded-For. Without this, req.ip is the proxy's
+// address and every visitor shares a single rate-limit bucket. `1` trusts
+// exactly one hop — trusting them all would let a caller spoof the header and
+// mint a fresh bucket per request.
+app.set('trust proxy', 1);
+
+// Q&A history is the only body the API accepts and it's capped at 40 short
+// messages client-side; 100kb is Express's default and is already generous
+// for that, but stating it keeps a large-body DoS off the table explicitly.
+app.use(express.json({ limit: '100kb' }));
 
 /* ---------------- index.html + absolute link-preview URLs ----------------
 

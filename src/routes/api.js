@@ -4,8 +4,16 @@ const { askAboutCandidate } = require('../lib/candidateQa');
 const { askAboutBill } = require('../lib/billQa');
 const webSearch = require('../sources/webSearch');
 const { BILL_TYPES } = require('../sources/congress');
+const { askLimiter, apiLimiter } = require('../lib/rateLimit');
 
 const router = express.Router();
+
+// Both endpoints that reach a metered upstream share one limiter instance, so
+// the budget is per-service rather than per-route — otherwise the ceiling
+// doubles every time another Q&A panel is added.
+const askLimit = askLimiter();
+
+router.use(apiLimiter());
 
 /**
  * Bill coordinates arrive as three path segments. Validating them here keeps
@@ -72,7 +80,7 @@ router.get('/candidates/:id', async (req, res, next) => {
 // POST /api/candidates/:id/ask — ask an AI question about this candidate.
 // Scoped to U.S. elections/candidates by the system prompt in candidateQa;
 // history comes from (and is stored only in) the caller's browser.
-router.post('/candidates/:id/ask', async (req, res, next) => {
+router.post('/candidates/:id/ask', askLimit, async (req, res, next) => {
   try {
     const { question, history } = req.body || {};
     if (typeof question !== 'string' || !question.trim()) {
@@ -152,7 +160,7 @@ router.get('/bills/:congress/:type/:number', async (req, res, next) => {
 // POST /api/bills/:congress/:type/:number/ask — AI answer about this bill.
 // Scoped to U.S. legislation and elections by the system prompt in billQa;
 // history comes from (and is stored only in) the caller's browser.
-router.post('/bills/:congress/:type/:number/ask', async (req, res, next) => {
+router.post('/bills/:congress/:type/:number/ask', askLimit, async (req, res, next) => {
   try {
     const { question, history } = req.body || {};
     if (typeof question !== 'string' || !question.trim()) {
