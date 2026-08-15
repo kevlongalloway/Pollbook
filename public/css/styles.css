@@ -1279,6 +1279,21 @@ button.deep-link { cursor: pointer; font-family: var(--font-mono); }
 
 .qa-actions { margin-top: 0.6rem; }
 
+/* Available to screen readers, absent for everyone else. Clipped rather than
+   `display:none` or `visibility:hidden`, both of which take content out of the
+   accessibility tree entirely — which would defeat the point. */
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
 /* ---------- money flow diagram ---------- */
 
 /* The SVG carries its own geometry; this only has to give it room and keep
@@ -1358,6 +1373,77 @@ button.deep-link { cursor: pointer; font-family: var(--font-mono); }
 
 .mf-swatch--rule { background: var(--white); border-style: dashed; }
 .mf-swatch--ink { background: var(--ink); }
+
+/* ---------- race money comparison ---------- */
+
+.race-compare { margin-top: 0.75rem; }
+
+.cmp-grid {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  margin-top: 0.5rem;
+}
+
+.cmp-cand {
+  border: var(--rule-thin);
+  background: var(--white);
+  padding: 0.85rem;
+}
+
+.cmp-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.5rem;
+  padding-bottom: 0.6rem;
+  margin-bottom: 0.6rem;
+  border-bottom: var(--rule-thin);
+  font-weight: 700;
+}
+
+.cmp-head a { text-decoration: none; }
+.cmp-head a:hover { color: var(--blue); }
+
+.cmp-row {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0.2rem;
+  margin-bottom: 0.55rem;
+}
+
+.cmp-label {
+  font-family: var(--font-mono);
+  font-size: 0.66rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #4A4F55;
+}
+
+.cmp-track {
+  display: block;
+  height: 0.85rem;
+  background: var(--paper);
+  border: 1.5px solid var(--ink);
+}
+
+.cmp-bar {
+  display: block;
+  height: 100%;
+  /* Zero-width bars still need to read as "nothing", not as a missing row. */
+  min-width: 0;
+  transition: width 0.3s ease;
+}
+
+.cmp-bar--raised { background: var(--blue); }
+.cmp-bar--for { background: #9AA8E8; }
+.cmp-bar--against { background: #B3231F; }
+
+.cmp-amt {
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  font-weight: 600;
+}
 
 /* ---------- bills ---------- */
 

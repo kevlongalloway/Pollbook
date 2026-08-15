@@ -326,24 +326,58 @@ module.exports = {
       }
     }
 
-    let window = [];
-    try {
-      window = await congress.recentBills(cur);
-      sources.congress = 'ok';
-    } catch (err) {
-      sources.congress = 'error';
-      sources.congressMessage = err.message;
+    // Two independent discovery channels: titles of recently-updated bills,
+    // and the text of recently-published CRS summaries. Neither is sufficient
+    // — titles miss provisions buried in broadly-named bills, summaries lag
+    // introduction by weeks — so both run and the results are merged. If only
+    // one succeeds the page still works, on whatever that one found.
+    const [byTitle, bySummary] = await Promise.all([
+      congress.recentBills(cur).catch((err) => {
+        sources.congress = 'error';
+        sources.congressMessage = err.message;
+        return [];
+      }),
+      congress.recentSummaries(cur).catch(() => {
+        sources.summaries = 'error';
+        return [];
+      }),
+    ]);
+    if (!sources.congress) sources.congress = 'ok';
+
+    // Merged rather than first-wins: a bill in both channels must keep the
+    // freshest status from the title feed *and* the summary text from the
+    // other, or it silently loses the ability to match on its description.
+    const merged = new Map();
+    for (const b of [...bySummary, ...byTitle]) {
+      const prev = merged.get(b.id);
+      merged.set(b.id, prev ? { ...prev, ...b, summaryText: b.summaryText || prev.summaryText } : b);
     }
+    const window = [...merged.values()];
+
+    // summaryText exists to be matched against, not displayed — it runs to
+    // several KB per bill and would dominate the response.
+    const strip = ({ summaryText, ...rest }) => rest;
 
     if (query) {
       const needle = query.toLowerCase();
       const bills = window
-        .filter((b) => b.title.toLowerCase().includes(needle) || b.label.toLowerCase().includes(needle))
-        .slice(0, 40);
+        .filter((b) => b.title.toLowerCase().includes(needle)
+          || b.label.toLowerCase().includes(needle)
+          || (b.summaryText || '').toLowerCase().includes(needle))
+        .slice(0, 40)
+        .map(strip);
       return { query, congress: cur, mode: 'search', coverage: window.length, bills, sources };
     }
 
-    const feed = window.filter((b) => congress.isElectionBill(b.title));
+    // A summary match is weaker evidence than a title match — the phrase may
+    // be incidental to a bill that is mostly about something else — so those
+    // are marked, and the page says how each one was found.
+    const feed = window
+      .filter((b) => congress.isElectionBill(b.title)
+        || (b.summaryText && congress.isElectionBill(b.summaryText)))
+      .map((b) => (congress.isElectionBill(b.title)
+        ? b
+        : { ...b, matchedOn: 'summary' }));
 
     // Watchlist bills are fetched live and verified before use; a number that
     // no longer resolves to the expected bill is dropped, never guessed at.
@@ -358,7 +392,7 @@ module.exports = {
     const bills = [
       ...pinned,
       ...feed.filter((b) => !seen.has(b.id)),
-    ].slice(0, 60);
+    ].slice(0, 60).map(strip);
 
     return { query: '', congress: cur, mode: 'feed', coverage: window.length, bills, sources };
   },
