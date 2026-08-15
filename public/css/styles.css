@@ -1209,6 +1209,47 @@ button.deep-link { cursor: pointer; font-family: var(--font-mono); }
 
 .qa-msg--pending p { color: #4A4F55; font-style: italic; }
 
+/* Citations under an AI answer — where a web-sourced claim came from. */
+.qa-sources {
+  margin-top: 0.4rem;
+  padding-left: 0.8rem;
+  border-left: 4px solid transparent;
+}
+
+.qa-sources-label {
+  display: block;
+  font-family: var(--font-mono);
+  font-size: 0.6rem;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: #6B7077;
+  margin-bottom: 0.2rem;
+}
+
+.qa-sources ol {
+  margin: 0;
+  padding-left: 1.1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.qa-sources li {
+  font-size: 0.75rem;
+  color: #4A4F55;
+  overflow-wrap: anywhere;
+}
+
+.qa-sources a {
+  color: var(--blue);
+  text-decoration: none;
+}
+
+.qa-sources a:hover { text-decoration: underline; }
+
+.qa-source-date { color: #6B7077; }
+
 .qa-empty { padding: 1.25rem; }
 
 .qa-form { display: flex; gap: 0.6rem; }

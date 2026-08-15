@@ -1,6 +1,7 @@
 const express = require('express');
 const service = require('../services/electionService');
 const { askAboutCandidate } = require('../lib/candidateQa');
+const webSearch = require('../sources/webSearch');
 
 const router = express.Router();
 
@@ -13,6 +14,7 @@ router.get('/meta', (req, res) => {
     provider,
     live: provider === 'live',
     fecKey: process.env.FEC_API_KEY ? 'configured' : 'DEMO_KEY',
+    webSearch: webSearch.provider(),
   });
 });
 
@@ -65,8 +67,10 @@ router.post('/candidates/:id/ask', async (req, res, next) => {
     const candidate = await service.getCandidateById(req.params.id);
     if (!candidate) return res.status(404).json({ error: 'Candidate not found' });
 
-    const answer = await askAboutCandidate(candidate, question.trim(), Array.isArray(history) ? history : []);
-    res.json({ answer });
+    const { answer, sources } = await askAboutCandidate(
+      candidate, question.trim(), Array.isArray(history) ? history : []
+    );
+    res.json({ answer, sources });
   } catch (err) { next(err); }
 });
 
