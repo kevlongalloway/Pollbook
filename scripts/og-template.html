@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<!-- Source for public/og-image.png (1200×630 link preview card).
+     Rendered to PNG by scripts/generate-assets.js, which swaps the /*__FONT_CSS__*/
+     marker below for @font-face rules carrying the webfonts inline as data URIs,
+     so the render never depends on the network at screenshot time. The marker is
+     a comment so this file stays valid CSS when opened directly.
+     Palette and type are lifted from public/css/styles.css. -->
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<style>
+/*__FONT_CSS__*/
+
+:root {
+  --paper: #EFF0EB;
+  --ink: #15181B;
+  --blue: #2038C8;
+  --blue-deep: #17289B;
+  --yellow: #F2B807;
+  --concrete: #C7CBC1;
+  --white: #FDFDFB;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  width: 1200px;
+  height: 630px;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: "Public Sans", sans-serif;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+}
+
+.oval {
+  display: inline-block;
+  width: 1.35em;
+  height: 0.8em;
+  border: 2.5px solid currentColor;
+  border-radius: 50%;
+  vertical-align: -0.08em;
+  flex-shrink: 0;
+}
+
+.oval--filled { background: currentColor; }
+
+/* ---------- masthead ---------- */
+
+.masthead {
+  background: var(--blue);
+  color: var(--white);
+  height: 96px;
+  padding: 0 56px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.wordmark {
+  font-family: "Archivo", sans-serif;
+  font-weight: 900;
+  font-stretch: 118%;
+  font-size: 44px;
+  letter-spacing: 0.04em;
+  display: inline-flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.wordmark .oval { color: var(--yellow); }
+
+.form-no {
+  font-family: "IBM Plex Mono", monospace;
+  font-weight: 500;
+  font-size: 18px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  opacity: 0.85;
+}
+
+.rulebar { display: flex; height: 12px; }
+.rulebar span:nth-child(1) { flex: 3; background: var(--blue-deep); }
+.rulebar span:nth-child(2) { flex: 1; background: var(--yellow); }
+.rulebar span:nth-child(3) { flex: 6; background: var(--ink); }
+
+/* ---------- body ---------- */
+
+.stage {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 52px;
+  padding: 0 56px;
+}
+
+.headline {
+  font-family: "Archivo", sans-serif;
+  font-weight: 900;
+  font-stretch: 118%;
+  font-size: 70px;
+  line-height: 0.96;
+  letter-spacing: -0.015em;
+  text-transform: uppercase;
+  white-space: nowrap; /* the <br>s are the only line breaks — never reflow */
+}
+
+.headline .accent { color: var(--blue); }
+
+.deck {
+  margin-top: 26px;
+  font-size: 25px;
+  line-height: 1.35;
+  font-weight: 600;
+  max-width: 30ch;
+  color: #3A4048;
+}
+
+/* ---------- ballot card ---------- */
+
+.ballot {
+  width: 320px;
+  flex-shrink: 0;
+  border: 3px solid var(--ink);
+  background: var(--white);
+  box-shadow: 14px 14px 0 var(--concrete);
+}
+
+.ballot-strip {
+  background: var(--ink);
+  color: var(--white);
+  font-family: "IBM Plex Mono", monospace;
+  font-weight: 500;
+  font-size: 15px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  padding: 10px 16px;
+  display: flex;
+  justify-content: space-between;
+}
+
+.ballot-rows { padding: 20px 22px 24px; }
+
+.ballot-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 13px 0;
+  border-bottom: 1.5px solid var(--concrete);
+}
+
+.ballot-row:last-child { border-bottom: none; }
+
+.ballot-row .oval { font-size: 30px; color: var(--ink); }
+.ballot-row.marked .oval { color: var(--blue); }
+
+.bar { height: 13px; background: var(--concrete); flex: 1; }
+.ballot-row.marked .bar { background: var(--ink); }
+
+/* ---------- footer strip ---------- */
+
+.strip {
+  background: var(--ink);
+  color: var(--white);
+  height: 62px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 22px;
+  font-family: "IBM Plex Mono", monospace;
+  font-weight: 500;
+  font-size: 19px;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+}
+
+.strip .dot { color: var(--yellow); }
+</style>
+</head>
+<body>
+
+  <header class="masthead">
+    <span class="wordmark"><span class="oval oval--filled"></span>POLLBOOK</span>
+    <span class="form-no">Form PB-100</span>
+  </header>
+
+  <div class="rulebar"><span></span><span></span><span></span></div>
+
+  <main class="stage">
+    <div>
+      <h1 class="headline">Every election.<br />Every ballot.<br /><span class="accent">Yours.</span></h1>
+      <p class="deck">Who's on the ticket, who funds them, and where they stand — all 50 states and DC.</p>
+    </div>
+
+    <div class="ballot">
+      <div class="ballot-strip"><span>Sample Ballot</span><span>2026</span></div>
+      <div class="ballot-rows">
+        <div class="ballot-row marked"><span class="oval oval--filled"></span><span class="bar"></span></div>
+        <div class="ballot-row"><span class="oval"></span><span class="bar"></span></div>
+        <div class="ballot-row"><span class="oval"></span><span class="bar"></span></div>
+        <div class="ballot-row"><span class="oval"></span><span class="bar"></span></div>
+      </div>
+    </div>
+  </main>
+
+  <footer class="strip">
+    <span>Nonpartisan</span><span class="dot">&bull;</span>
+    <span>Live FEC filings</span><span class="dot">&bull;</span>
+    <span>Market odds</span>
+  </footer>
+
+</body>
+</html>

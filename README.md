@@ -56,15 +56,41 @@ The PAC tracker searches any committee and shows who it funds and opposes. Commi
 | `GROQ_API_KEY` | none | Enables the "Ask about this candidate" AI panel. Free key at [console.groq.com/keys](https://console.groq.com/keys). Without it, that panel returns a plain error and the rest of the app is unaffected. |
 | `GROQ_MODEL` | `llama-3.3-70b-versatile` | Groq model used for candidate Q&A. |
 | `GROQ_API_BASE` | Groq's OpenAI-compatible endpoint | Override the API base (e.g. for testing against a stub). |
+| `PUBLIC_BASE_URL` | inferred per request | Canonical origin (e.g. `https://pollbook.example`) used for the OpenGraph/canonical URLs. Unset, the server derives it from the request's forwarded host — correct on Render, but pin it if you serve the app behind a CDN or a custom domain alias. |
 
 ### Candidate Q&A (AI)
 
 Every candidate page has an "Ask about this candidate" panel, backed by [Groq](https://groq.com) (free-tier chat completions). It's grounded in that candidate's Pollbook profile — FEC filings, Wikipedia bio/positions, recent headlines — and a system prompt that keeps it strictly nonpartisan and scoped to U.S. elections: any question outside U.S. elections/candidates gets a fixed refusal ("I only give information on United States elections and their candidates.") instead of an answer. Conversation history is kept in the browser's `localStorage` only (`pb-ai-<candidateId>`) — nothing is stored server-side, and there's a "Clear conversation" button per candidate.
 
+## Brand assets and link previews
+
+`public/logo.svg` is the master mark — a filled ballot oval in signage yellow on a
+civic-blue field, the same oval the UI uses as its signature element. Everything
+raster is generated from it, so the SVG is the only file to edit:
+
+```bash
+npm install --no-save playwright && node scripts/generate-assets.js
+```
+
+That script (headless Chromium, webfonts inlined so the render is deterministic)
+rewrites `favicon.ico` (16/32/48), `apple-touch-icon.png` (180), `icon-192.png`,
+`icon-512.png`, and `og-image.png` — the 1200×630 card, whose layout lives in
+`scripts/og-template.html`. Playwright is intentionally *not* a package
+dependency: it's a one-off authoring tool, not something a deploy should install.
+
+Link previews (iMessage, Slack, Signal, WhatsApp, X, Facebook) need **absolute**
+URLs — Apple's fetcher silently drops a relative `og:image`, which is the usual
+reason a shared link arrives as a bare grey bubble. The origin isn't knowable at
+build time, so `index.html` carries a `__BASE_URL__` placeholder that `server.js`
+substitutes on each render, from `PUBLIC_BASE_URL` when set and otherwise from
+the request's `X-Forwarded-Proto`/`X-Forwarded-Host`. The `Host` header is
+caller-controlled, so anything that isn't a plain `host:port` is dropped rather
+than reflected into the page.
+
 ## Architecture
 
 ```
-server.js                          Express entry
+server.js                          Express entry; injects absolute OG/canonical URLs
 src/routes/api.js                  REST endpoints
 src/services/electionService.js    Picks the data provider (DATA_PROVIDER env)
 src/providers/liveProvider.js      Composes the live sources (default)
@@ -81,6 +107,9 @@ src/sources/markets.js             PredictIt odds + candidate matching
 src/sources/wikipedia.js           Bio + political-positions extraction
 src/sources/news.js                Google News RSS
 public/                            Vanilla frontend (hash-routed SPA)
+public/logo.svg                    Master mark — source for every icon
+scripts/generate-assets.js         Regenerates favicons + og-image.png from it
+scripts/og-template.html           Layout of the 1200×630 link-preview card
 ```
 
 ## API
