@@ -319,6 +319,10 @@ Election IDs are stable and derived: `ga-general-2026`, `wy-primary-2026`, `us-g
 
 ## Extending
 
+Larger planned work — SEO and real URLs, voting records, accounts and alerts,
+state-level coverage — is written up in [ROADMAP.md](ROADMAP.md), one section
+each with the reasoning and what's already in place.
+
 - **State/local races**: the provider interface is the contract — implement it against Google Civic (`googleCivicProvider.js` has the endpoint mapping plan), a state SoS scraper, or your own Postgres curation and set `DATA_PROVIDER`.
 - **More odds sources**: `src/sources/markets.js` isolates the PredictIt schema; add Polymarket or election forecasters behind the same `marketsForRace` shape.
 - **2028 and beyond**: general-election dates roll over automatically after election day; add the next cycle's statutory primary dates to `usStates.js` when states publish them. The congress number advances on its own (`calendar.currentCongress`), so the bills feed follows a new Congress without a code change — but watchlist entries in `electionBills.js` are pinned to a congress and will simply stop appearing, which is the intended failure. Add the new Congress's entries when its bills are numbered.
