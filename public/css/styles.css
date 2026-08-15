@@ -28,7 +28,11 @@
 
 * { margin: 0; padding: 0; box-sizing: border-box; }
 
-html { scroll-behavior: smooth; }
+html {
+  scroll-behavior: smooth;
+  touch-action: manipulation; /* kill double-tap-to-zoom; pinch is disabled via viewport meta */
+  -webkit-text-size-adjust: 100%;
+}
 
 body {
   background: var(--paper);
@@ -40,6 +44,21 @@ body {
 }
 
 a { color: inherit; }
+
+/* Reset native button chrome — iOS/Android otherwise render an unstyled
+   <button> (e.g. a submit button with no other rules) as a system-blue
+   pill instead of picking up this design. Selects keep their native
+   appearance for the dropdown affordance. */
+button {
+  font: inherit;
+  color: inherit;
+  appearance: none;
+  -webkit-appearance: none;
+  border-radius: 0;
+  background: none;
+  border: none;
+  cursor: pointer;
+}
 
 ::selection { background: var(--yellow); color: var(--ink); }
 
@@ -330,7 +349,7 @@ a { color: inherit; }
 }
 
 .browse-controls select,
-.browse-controls button {
+.filter-btn {
   font-family: var(--font-mono);
   font-size: 0.85rem;
   border: var(--rule-thin);
@@ -1204,6 +1223,18 @@ button.deep-link { cursor: pointer; font-family: var(--font-mono); }
   color: var(--ink);
   padding: 0.6rem 0.8rem;
 }
+
+.qa-send {
+  background: var(--blue);
+  color: var(--white);
+  border-color: var(--blue);
+  font-family: var(--font-display);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+
+.qa-send:hover { background: var(--blue-deep); border-color: var(--blue-deep); }
 
 .qa-actions { margin-top: 0.6rem; }
 
