@@ -14,6 +14,8 @@
  *   getStats(state) → StatsPayload               campaign-finance snapshot
  *   searchCandidates(q) → [CandidateMatch]
  *   getNationalMarkets() → [Market]              balance-of-power odds
+ *   getBills({ q }) → BillsPayload               bills before Congress
+ *   getBillById(congress, type, number) → BillDetail | null
  */
 
 const providers = {

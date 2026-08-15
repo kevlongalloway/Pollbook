@@ -46,4 +46,6 @@ module.exports = {
   getNationalMarkets: NOT_IMPLEMENTED,
   searchCommittees: NOT_IMPLEMENTED,
   getCommitteeById: NOT_IMPLEMENTED,
+  getBills: NOT_IMPLEMENTED,
+  getBillById: NOT_IMPLEMENTED,
 };

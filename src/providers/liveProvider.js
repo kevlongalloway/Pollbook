@@ -14,11 +14,14 @@
 
 const { STATES, getState, registrationUrl } = require('../data/usStates');
 const { expandQuery } = require('../data/committeeAliases');
+const { watchlistFor, matchesExpectation } = require('../data/electionBills');
 const calendar = require('../lib/calendar');
+const { buildMoneyFlow } = require('../lib/moneyFlow');
 const fec = require('../sources/fec');
 const markets = require('../sources/markets');
 const wikipedia = require('../sources/wikipedia');
 const news = require('../sources/news');
+const congress = require('../sources/congress');
 
 const OFFICE_NAMES = { S: 'U.S. Senate', H: 'U.S. House', P: 'President' };
 
@@ -197,6 +200,17 @@ module.exports = {
       ? `${base.state.toLowerCase()}-general-${latestYear}`
       : null;
 
+    const funding = {
+      topPacs,
+      employers,
+      donorSizes,
+      earmarked,
+      independent: {
+        support: independent.filter((r) => r.support),
+        oppose: independent.filter((r) => !r.support),
+      },
+    };
+
     return {
       ...base,
       officeLabel,
@@ -204,16 +218,8 @@ module.exports = {
       probability: self.probability ?? null,
       probabilitySource: self.probabilitySource ?? null,
       finance,
-      funding: {
-        topPacs,
-        employers,
-        donorSizes,
-        earmarked,
-        independent: {
-          support: independent.filter((r) => r.support),
-          oppose: independent.filter((r) => !r.support),
-        },
-      },
+      funding,
+      moneyFlow: buildMoneyFlow({ finance, funding }),
       wiki,
       positions: wiki?.positions || [],
       articles,
@@ -285,6 +291,86 @@ module.exports = {
       }
     }
     return { query: q, expansions, results: results.slice(0, 25) };
+  },
+
+  /**
+   * The bills page.
+   *
+   * With no query: election-related legislation, assembled from the watchlist
+   * plus a title filter over the recent-activity window. With a query: a
+   * direct bill-number lookup when the query parses as one, otherwise a title
+   * search across that same window.
+   *
+   * Congress.gov has no keyword search (see sources/congress.js), so the
+   * window is the search index — `coverage` reports how big it actually was so
+   * the UI can say what the search did and didn't cover rather than implying
+   * it searched all of Congress.
+   */
+  async getBills({ q } = {}) {
+    const cur = calendar.currentCongress();
+    const query = String(q || '').trim();
+    const sources = {};
+
+    // A bill number resolves directly and beats any list walk — this is what
+    // finds a bill that has fallen out of the recent-activity window.
+    if (query) {
+      const ref = congress.parseBillRef(query);
+      if (ref) {
+        const bill = await congress.billById(cur, ref.type, ref.number).catch(() => null);
+        if (bill) {
+          return {
+            query, congress: cur, mode: 'number', coverage: null,
+            bills: [bill], sources: { congress: 'ok' },
+          };
+        }
+      }
+    }
+
+    let window = [];
+    try {
+      window = await congress.recentBills(cur);
+      sources.congress = 'ok';
+    } catch (err) {
+      sources.congress = 'error';
+      sources.congressMessage = err.message;
+    }
+
+    if (query) {
+      const needle = query.toLowerCase();
+      const bills = window
+        .filter((b) => b.title.toLowerCase().includes(needle) || b.label.toLowerCase().includes(needle))
+        .slice(0, 40);
+      return { query, congress: cur, mode: 'search', coverage: window.length, bills, sources };
+    }
+
+    const feed = window.filter((b) => congress.isElectionBill(b.title));
+
+    // Watchlist bills are fetched live and verified before use; a number that
+    // no longer resolves to the expected bill is dropped, never guessed at.
+    const pinned = (await Promise.all(
+      watchlistFor(cur).map(async (entry) => {
+        const bill = await congress.billById(entry.congress, entry.type, entry.number).catch(() => null);
+        return matchesExpectation(entry, bill) ? { ...bill, why: entry.why, watchlisted: true } : null;
+      })
+    )).filter(Boolean);
+
+    const seen = new Set(pinned.map((b) => b.id));
+    const bills = [
+      ...pinned,
+      ...feed.filter((b) => !seen.has(b.id)),
+    ].slice(0, 60);
+
+    return { query: '', congress: cur, mode: 'feed', coverage: window.length, bills, sources };
+  },
+
+  async getBillById(congressNum, type, number) {
+    try {
+      return await congress.billById(congressNum, type, number);
+    } catch (err) {
+      const e = new Error(`Live legislative data (Congress.gov) is unreachable right now (${err.message}). Try again shortly.`);
+      e.status = 503;
+      throw e;
+    }
   },
 
   async getCommitteeById(id) {

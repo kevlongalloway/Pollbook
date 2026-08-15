@@ -57,6 +57,10 @@ const api = {
   committee: (id) => api.get(`/committees/${id}`),
   meta: () => api.get('/meta'),
   askCandidate: (id, question, history) => api.post(`/candidates/${id}/ask`, { question, history }),
+  bills: (q) => api.get(`/bills${q ? `?q=${encodeURIComponent(q)}` : ''}`),
+  bill: (congress, type, number) => api.get(`/bills/${congress}/${type}/${number}`),
+  askBill: (congress, type, number, question, history) =>
+    api.post(`/bills/${congress}/${type}/${number}/ask`, { question, history }),
 };
 
 /* ---------------- helpers ---------------- */
@@ -252,6 +256,208 @@ const fundingSection = (c) => {
     </section>`;
 };
 
+/* ---------------- money flow diagram ---------------- */
+
+/**
+ * Where a campaign's money comes from, drawn as a flow.
+ *
+ * Two rules make this honest, and the layout exists to enforce them:
+ *
+ *  - **Outside spending gets its own track, with no ribbon to the campaign.**
+ *    Independent expenditures never touch a campaign's books. Drawing them
+ *    flowing in would be the single most misleading thing this chart could do,
+ *    and it is exactly what a naive "total money" chart implies.
+ *  - **Both tracks share one ruler.** Pixels-per-dollar is constant across the
+ *    whole diagram, so when outside groups outspend the campaign the outside
+ *    stack is visibly taller. That comparison is the reason to draw this at
+ *    all, and it only holds if nothing is independently normalized.
+ *
+ * Conduit money is drawn as hatching *inside* the individual-donor bands
+ * rather than as its own inflow, because that is what it is: individual
+ * donations routed through an organization. A separate ribbon would
+ * double-count it against the individual total.
+ */
+const FLOW_COLORS = {
+  small: '#F2B807',
+  large: '#2038C8',
+  individuals: '#2038C8',
+  pacs: '#7A8290',
+  party: '#17289B',
+  other: '#C7CBC1',
+};
+
+const flowPct = (share) => `${share < 0.01 ? '<1' : Math.round(share * 100)}%`;
+
+/** Sankey ribbon: source band edge to campaign node edge, as one closed path. */
+function ribbonPath(x0, y0, x1, y1, h0, h1) {
+  const mid = (x0 + x1) / 2;
+  return [
+    `M${x0},${y0}`,
+    `C${mid},${y0} ${mid},${y1} ${x1},${y1}`,
+    `L${x1},${y1 + h1}`,
+    `C${mid},${y1 + h1} ${mid},${y0 + h0} ${x0},${y0 + h0}`,
+    'Z',
+  ].join(' ');
+}
+
+function moneyFlowSvg(mf) {
+  const W = 680;
+  const LBL_R = 176;        // right edge of the label column
+  const SRC_X = 184;
+  const SRC_W = 11;
+  const CAMP_X = 452;
+  const CAMP_W = 15;
+  const BAND_GAP = 4;
+  const TRACK_H = 210;      // pixels representing `mf.scale` dollars
+  const TOP = 30;
+
+  const pxPer = TRACK_H / mf.scale;
+  // A band below a pixel or two vanishes; the label still carries the exact
+  // figure, so a hairline reads as "negligible" rather than as zero.
+  const bandH = (amount) => Math.max(2, amount * pxPer);
+
+  const inflows = mf.campaign.inflows || [];
+  const parts = [];
+
+  /* ---- campaign track ---- */
+
+  const campH = inflows.reduce((t, f) => t + bandH(f.amount), 0);
+  let srcY = TOP;
+  let campY = TOP;
+
+  // Geometry first, labels second. A band only a few pixels tall can't hold a
+  // two-line label at its own centre, and small bands cluster — so labels are
+  // laid out in a separate pass that pushes each one clear of the last and
+  // draws a leader back to the band it belongs to.
+  const bands = inflows.map((f) => {
+    const h = bandH(f.amount);
+    const geom = { f, h, srcY, campY, color: FLOW_COLORS[f.key] || FLOW_COLORS.other };
+    srcY += h + BAND_GAP;
+    campY += h;
+    return geom;
+  });
+
+  const LABEL_H = 27;
+  let labelFloor = -Infinity;
+  for (const g of bands) {
+    const wanted = g.srcY + g.h / 2;
+    g.labelY = Math.max(wanted, labelFloor + LABEL_H / 2);
+    g.displaced = Math.abs(g.labelY - wanted) > 3;
+    labelFloor = g.labelY + LABEL_H / 2;
+  }
+
+  for (const g of bands) {
+    const { f, h, color } = g;
+    parts.push(`<path d="${ribbonPath(SRC_X + SRC_W, g.srcY, CAMP_X, g.campY, h, h)}" fill="${color}" fill-opacity="0.42" />`);
+    parts.push(`<rect x="${SRC_X}" y="${g.srcY}" width="${SRC_W}" height="${h}" fill="${color}" />`);
+
+    // Conduit hatching sits inside the individual bands only — that is the
+    // channel bundled money actually arrives through.
+    const conduits = mf.campaign.conduits;
+    if (conduits && (f.key === 'small' || f.key === 'large' || f.key === 'individuals')) {
+      // Runs past the source bar into the head of the ribbon purely so the
+      // hatching is legible — the *height* is the only thing carrying data.
+      const ch = h * conduits.shareOfIndividuals;
+      parts.push(`<rect x="${SRC_X}" y="${g.srcY + h - ch}" width="${SRC_W + 32}" height="${ch}" fill="url(#pb-hatch)" />`);
+    }
+
+    if (g.displaced) {
+      parts.push(`<path d="M${LBL_R + 5},${g.labelY + 3} L${SRC_X - 5},${g.srcY + h / 2}" stroke="${color}" stroke-width="1" fill="none" />`);
+    }
+
+    parts.push(`
+      <text x="${LBL_R}" y="${g.labelY - 1}" text-anchor="end" class="mf-label">${esc(f.label)}</text>
+      <text x="${LBL_R}" y="${g.labelY + 12}" text-anchor="end" class="mf-amt">${fmtMoney(f.amount)} · ${flowPct(f.share)}</text>`);
+  }
+
+  // Labels can run past the last band when several thin ones stack up.
+  const labelsBottom = bands.length ? bands.at(-1).labelY + LABEL_H / 2 : TOP;
+
+  parts.push(`<rect x="${CAMP_X}" y="${TOP}" width="${CAMP_W}" height="${campH}" fill="#15181B" />`);
+  parts.push(`
+    <text x="${CAMP_X + CAMP_W + 10}" y="${TOP + campH / 2 - 1}" class="mf-node">The campaign</text>
+    <text x="${CAMP_X + CAMP_W + 10}" y="${TOP + campH / 2 + 13}" class="mf-amt">${fmtMoney(mf.campaign.raised)} raised</text>`);
+
+  parts.push(`<text x="0" y="16" class="mf-track-label">MONEY INTO THE CAMPAIGN</text>`);
+
+  /* ---- outside track ---- */
+
+  const bottomOfCampaign = Math.max(srcY, TOP + campH, labelsBottom);
+  let height = bottomOfCampaign + 20;
+
+  if (mf.outside) {
+    const dividerY = height + 14;
+    parts.push(`<line x1="0" y1="${dividerY}" x2="${W}" y2="${dividerY}" stroke="#15181B" stroke-width="1.5" stroke-dasharray="5 5" />`);
+    parts.push(`<text x="0" y="${dividerY + 20}" class="mf-track-label">SPENT ABOUT THIS CANDIDATE — NEVER TOUCHES THE CAMPAIGN</text>`);
+
+    let y = dividerY + 34;
+    const rows = [
+      ['Supporting them', mf.outside.support, '#2038C8'],
+      ['Opposing them', mf.outside.oppose, '#B3231F'],
+    ].filter(([, group]) => group && group.total > 0);
+
+    for (const [label, group, color] of rows) {
+      const h = bandH(group.total);
+      // Deliberately starts at SRC_X and stops short of the campaign node: the
+      // gap between this bar and the black bar above is the whole point.
+      parts.push(`<rect x="${SRC_X}" y="${y}" width="${SRC_W}" height="${h}" fill="${color}" />`);
+      parts.push(`<path d="${ribbonPath(SRC_X + SRC_W, y, CAMP_X - 42, y, h, h)}" fill="${color}" fill-opacity="0.30" />`);
+      parts.push(`
+        <text x="${LBL_R}" y="${y + h / 2 - 1}" text-anchor="end" class="mf-label">${esc(label)}</text>
+        <text x="${LBL_R}" y="${y + h / 2 + 12}" text-anchor="end" class="mf-amt">${fmtMoney(group.total)}</text>`);
+      y += h + 14;
+    }
+
+    parts.push(`
+      <text x="${CAMP_X - 30}" y="${dividerY + 46}" class="mf-node">The race</text>
+      <text x="${CAMP_X - 30}" y="${dividerY + 60}" class="mf-amt">ads, mail, canvassing</text>`);
+
+    height = y + 10;
+  }
+
+  const alt = [
+    `Money flow for this campaign.`,
+    `Into the campaign: ${inflows.map((f) => `${f.label} ${fmtMoney(f.amount)}`).join(', ')}.`,
+    mf.campaign.conduits ? `Of the individual money, ${fmtMoney(mf.campaign.conduits.total)} was bundled through conduits.` : '',
+    mf.outside ? `Spent separately about this candidate, never touching the campaign: ${fmtMoney(mf.outside.support.total)} supporting, ${fmtMoney(mf.outside.oppose.total)} opposing.` : '',
+  ].filter(Boolean).join(' ');
+
+  return `
+    <svg class="mf-svg" viewBox="0 0 ${W} ${height}" role="img" aria-label="${esc(alt)}" preserveAspectRatio="xMidYMin meet">
+      <defs>
+        <pattern id="pb-hatch" patternUnits="userSpaceOnUse" width="6" height="6" patternTransform="rotate(45)">
+          <rect width="6" height="6" fill="#FDFDFB" fill-opacity="0.25" />
+          <line x1="0" y1="0" x2="0" y2="6" stroke="#15181B" stroke-width="2.5" />
+        </pattern>
+      </defs>
+      ${parts.join('')}
+    </svg>`;
+}
+
+const moneyFlowSection = (c) => {
+  const mf = c.moneyFlow;
+  if (!mf) return '';
+  const conduits = mf.campaign.conduits;
+
+  return `
+    <section class="section">
+      <div class="section-head">
+        <h2>Where the money comes from</h2>
+        <span class="count">${mf.coverageEnd ? `FEC filings through ${fmtDate(mf.coverageEnd)}` : 'FEC filings, fetched live'}</span>
+      </div>
+      <div class="mf-wrap">${moneyFlowSvg(mf)}</div>
+      <div class="mf-legend">
+        ${conduits ? `
+          <span class="mf-key"><span class="mf-swatch mf-swatch--hatch"></span>${fmtMoney(conduits.total)} of the individual money was bundled through a conduit${conduits.top.length ? ` — largest: ${esc(conduits.top[0].name)}` : ''}. It arrives as individual donations, so it is drawn inside those bands, not as money of its own.</span>` : ''}
+        ${mf.outside ? `
+          <span class="mf-key"><span class="mf-swatch mf-swatch--rule"></span>Everything below the dashed line is independent expenditure — unlimited outside spending for or against this candidate that never enters the campaign's accounts. Both halves of the diagram are drawn to the same scale, so the heights are directly comparable.</span>` : ''}
+        ${mf.campaign.spent ? `
+          <span class="mf-key"><span class="mf-swatch mf-swatch--ink"></span>The campaign has spent ${fmtMoney(mf.campaign.spent)}${mf.campaign.cashOnHand ? `, with ${fmtMoney(mf.campaign.cashOnHand)} still on hand` : ''}.</span>` : ''}
+        ${(mf.caveats || []).map((c2) => `<span class="mf-key mf-key--caveat">${esc(c2)}</span>`).join('')}
+      </div>
+    </section>`;
+};
+
 const raceBlock = (r) => `
   <div class="race-block">
     <div class="race-office">${esc(r.office)}</div>
@@ -261,18 +467,19 @@ const raceBlock = (r) => `
     ${(r.markets || []).length ? marketPanel(r.markets[0]) : ''}
   </div>`;
 
-/* ---------------- candidate Q&A (AI, Groq) ---------------- */
+/* ---------------- Q&A panel (AI, Groq) ---------------- */
 
-/** History lives only in the browser — one localStorage entry per candidate. */
-const qaKey = (id) => `pb-ai-${id}`;
+/* Shared by the candidate and bill panels. History lives only in the browser —
+   one localStorage entry per subject, and the key is passed in so a bill
+   conversation and a candidate conversation never collide. */
 
-const loadQaHistory = (id) => {
-  try { return JSON.parse(localStorage.getItem(qaKey(id)) || '[]'); }
+const loadQaHistory = (key) => {
+  try { return JSON.parse(localStorage.getItem(key) || '[]'); }
   catch { return []; }
 };
 
-const saveQaHistory = (id, history) =>
-  localStorage.setItem(qaKey(id), JSON.stringify(history.slice(-40)));
+const saveQaHistory = (key, history) =>
+  localStorage.setItem(key, JSON.stringify(history.slice(-40)));
 
 /**
  * esc() escapes quotes but would happily pass through `javascript:` — and
@@ -301,75 +508,96 @@ const qaMsgHtml = (m) => `
     ${m.role === 'user' ? '' : qaSourcesHtml(m.sources)}
   </div>`;
 
-function renderQaLog(id) {
+function renderQaLog(key, emptyMsg) {
   const log = document.getElementById('qa-log');
   if (!log) return;
-  const history = loadQaHistory(id);
+  const history = loadQaHistory(key);
   log.innerHTML = history.length
     ? history.map(qaMsgHtml).join('')
-    : '<div class="empty qa-empty">No questions yet — ask anything about this candidate, or about U.S. elections generally.</div>';
+    : `<div class="empty qa-empty">${esc(emptyMsg)}</div>`;
   log.scrollTop = log.scrollHeight;
 }
 
-function setupCandidateQa(id) {
-  renderQaLog(id);
+/**
+ * Wire up the panel. `ask` is the only thing that differs between subjects —
+ * it takes (question, history) and resolves to { answer, sources }.
+ */
+function setupQa({ storeKey, ask, emptyMsg }) {
+  renderQaLog(storeKey, emptyMsg);
 
   const form = document.getElementById('qa-form');
   const input = document.getElementById('qa-input');
   const clearBtn = document.getElementById('qa-clear');
+  if (!form) return;
 
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
     const question = input.value.trim();
     if (!question) return;
 
-    const historyForRequest = loadQaHistory(id);
+    const historyForRequest = loadQaHistory(storeKey);
     const history = [...historyForRequest, { role: 'user', content: question }];
-    saveQaHistory(id, history);
+    saveQaHistory(storeKey, history);
     input.value = '';
     input.disabled = true;
-    renderQaLog(id);
+    renderQaLog(storeKey, emptyMsg);
     document.getElementById('qa-log').insertAdjacentHTML('beforeend',
       qaMsgHtml({ role: 'assistant', content: 'Thinking… this may take a few seconds if it needs to search.', pending: true }));
 
     try {
-      const { answer, sources } = await api.askCandidate(id, question, historyForRequest);
+      const { answer, sources } = await ask(question, historyForRequest);
       // Sources are persisted alongside the answer so citations survive a
       // reload — the server re-maps history to {role, content}, so this extra
       // key is never echoed back into the prompt.
-      saveQaHistory(id, [...history, { role: 'assistant', content: answer, sources: (sources || []).slice(0, 6) }]);
+      saveQaHistory(storeKey, [...history, { role: 'assistant', content: answer, sources: (sources || []).slice(0, 6) }]);
     } catch (err) {
-      saveQaHistory(id, [...history, { role: 'assistant', content: `Couldn't get an answer — ${err.message}` }]);
+      saveQaHistory(storeKey, [...history, { role: 'assistant', content: `Couldn't get an answer — ${err.message}` }]);
     } finally {
       input.disabled = false;
-      renderQaLog(id);
+      renderQaLog(storeKey, emptyMsg);
       input.focus();
     }
   });
 
   clearBtn.addEventListener('click', () => {
-    localStorage.removeItem(qaKey(id));
-    renderQaLog(id);
+    localStorage.removeItem(storeKey);
+    renderQaLog(storeKey, emptyMsg);
   });
 }
 
-const candidateQaSection = (c) => `
+const qaSection = ({ heading, tag, note, placeholder, ariaLabel }) => `
   <section class="qa-callout">
     <div class="qa-callout-head">
       <span class="qa-badge">AI</span>
-      <h2>Ask about ${esc(c.name)}</h2>
-      <span class="qa-callout-tag">U.S. elections only</span>
+      <h2>${esc(heading)}</h2>
+      <span class="qa-callout-tag">${esc(tag)}</span>
     </div>
     <div class="qa-callout-body">
-      <p class="qa-note">Grounded in this candidate's Pollbook profile — FEC filings, Wikipedia, news — and it searches the web when the profile doesn't cover your question, listing the sources it used. It only discusses United States elections and candidates, and refuses anything else. It can get things wrong; verify anything that matters. Your conversation stays in this browser, never on our server.</p>
+      <p class="qa-note">${esc(note)}</p>
       <div class="qa-log" id="qa-log"></div>
       <form id="qa-form" class="qa-form">
-        <input id="qa-input" type="text" placeholder="e.g. What are their views on healthcare?" autocomplete="off" aria-label="Ask a question about this candidate" />
+        <input id="qa-input" type="text" placeholder="${esc(placeholder)}" autocomplete="off" aria-label="${esc(ariaLabel)}" />
         <button type="submit" class="filter-btn qa-send">Ask</button>
       </form>
       <div class="qa-actions"><button type="button" id="qa-clear" class="deep-link">Clear conversation</button></div>
     </div>
   </section>`;
+
+const candidateQaSection = (c) => qaSection({
+  heading: `Ask about ${c.name}`,
+  tag: 'U.S. elections only',
+  note: "Grounded in this candidate's Pollbook profile — FEC filings, Wikipedia, news — and it searches the web when the profile doesn't cover your question, listing the sources it used. It only discusses United States elections and candidates, and refuses anything else. It can get things wrong; verify anything that matters. Your conversation stays in this browser, never on our server.",
+  placeholder: 'e.g. What are their views on healthcare?',
+  ariaLabel: 'Ask a question about this candidate',
+});
+
+const billQaSection = (b) => qaSection({
+  heading: `Ask about ${b.label}`,
+  tag: 'U.S. legislation only',
+  note: "Grounded in this bill's official record — the Congressional Research Service summary, sponsor, cosponsors and action history from Congress.gov — and it searches the web for current status and reaction, listing the sources it used. It explains what the bill does and who is for and against it; it will not argue either side. It can get things wrong; verify anything that matters against congress.gov. Your conversation stays in this browser, never on our server.",
+  placeholder: 'e.g. What would this actually change for voters?',
+  ariaLabel: 'Ask a question about this bill',
+});
 
 /* ---------------- views ---------------- */
 
@@ -639,6 +867,8 @@ async function viewCandidate(id) {
       </div>
     </section>` : ''}
 
+    ${moneyFlowSection(c)}
+
     ${fundingSection(c)}
 
     <section class="section">
@@ -677,7 +907,13 @@ async function viewCandidate(id) {
     </section>` : ''}
   `;
 
-  setupCandidateQa(c.id);
+  setupQa({
+    // Unchanged key shape — existing candidate conversations survive this
+    // panel becoming shared with bills.
+    storeKey: `pb-ai-${c.id}`,
+    ask: (question, history) => api.askCandidate(c.id, question, history),
+    emptyMsg: 'No questions yet — ask anything about this candidate, or about U.S. elections generally.',
+  });
 }
 
 async function viewData() {
@@ -826,6 +1062,173 @@ async function viewPacs(params) {
   });
 }
 
+/* ---------------- bills ---------------- */
+
+const STAGE_STEPS = ['Introduced', 'Committee', 'One chamber', 'Both chambers', 'Law'];
+
+/** Progress rail — where a bill has actually got to. */
+const stageRail = (stage) => {
+  const step = stage?.step ?? 1;
+  return `
+    <div class="stage-rail" role="img" aria-label="Status: ${esc(stage?.label || 'Introduced')}">
+      ${STAGE_STEPS.map((label, i) => `
+        <span class="stage-step ${i < step ? 'stage-step--done' : ''} ${i === step - 1 ? 'stage-step--now' : ''}">
+          <span class="stage-dot"></span><small>${esc(label)}</small>
+        </span>`).join('')}
+    </div>`;
+};
+
+const billHref = (b) => `#/bill/${b.congress}/${b.type}/${b.number}`;
+
+const billLine = (b) => `
+  <a class="bill-line" href="${esc(billHref(b))}">
+    <span class="bill-num">${esc(b.label)}</span>
+    <span class="bill-main">
+      <span class="bill-title">${esc(b.title)}</span>
+      <span class="bill-meta">${esc(b.stage?.label || '')}${b.latestAction?.date ? ` · last action ${fmtDate(b.latestAction.date)}` : ''}${b.watchlisted ? ' · tracked' : ''}</span>
+    </span>
+    <span class="tag tag--stage-${esc(b.stage?.key || 'introduced')}">${esc(b.stage?.label || '')}</span>
+  </a>`;
+
+async function viewBills(params) {
+  const q = (params.get('q') || '').trim();
+
+  let data = { bills: [], sources: {} };
+  let error = null;
+  try {
+    data = await api.bills(q);
+  } catch (err) {
+    error = err.message;
+  }
+
+  const down = data.sources && data.sources.congress === 'error';
+  // Only worth saying on a live instance: in mock mode nothing is fetched, and
+  // the red sample-data banner is already the louder warning.
+  const demoKey = state.meta.live && state.meta.congressKey === 'DEMO_KEY';
+  const QUICK = ['SAVE Act', 'HR 22', 'voting rights', 'redistricting', 'campaign finance'];
+
+  app.innerHTML = `
+    <section class="section">
+      <div class="section-head">
+        <h2>Bills before Congress</h2>
+        <span class="count">${q ? `${data.bills.length} match${data.bills.length === 1 ? '' : 'es'}` : (state.meta.live ? 'Congress.gov, fetched live' : 'Sample data')}</span>
+      </div>
+      <p style="max-width:70ch;margin-bottom:1rem">Elections aren't only decided at the ballot box — Congress writes the rules for how you register, how you vote, and how campaigns are funded. These are the election-related bills currently moving, straight from the official Congress.gov record, with the nonpartisan Congressional Research Service summary of what each one actually does. Search any bill by name, or by number: <strong>HR 22</strong>, <strong>S. 1</strong>.</p>
+
+      <form id="bill-form" class="browse-controls" role="search">
+        <input id="bill-input" type="search" value="${esc(q)}" placeholder="Search bills — try SAVE Act, or HR 22…" aria-label="Search bills" style="flex:2;min-width:220px" />
+        <button type="submit" class="filter-btn">Search</button>
+      </form>
+
+      <div class="links-row" style="margin-bottom:1.5rem">
+        ${QUICK.map((name) => `<button class="deep-link quick-bill" data-q="${esc(name)}">${esc(name)}</button>`).join('')}
+      </div>
+
+      ${error ? noteBox(error) : ''}
+      ${down ? noteBox('Live legislative data (Congress.gov) is unreachable right now. This list will fill in automatically once the connection recovers.') : ''}
+      ${demoKey ? noteBox('This instance is running on the shared Congress.gov demo key, which allows only 30 requests an hour across everyone using it — so the bill list and individual bill pages will intermittently come up short or empty. Setting CONGRESS_API_KEY (free, instant, from api.congress.gov/sign-up) fixes it.') : ''}
+
+      ${data.bills.length ? `<div class="bill-list">${data.bills.map(billLine).join('')}</div>` : ''}
+
+      ${!data.bills.length && !error && !down ? `<div class="empty">${q
+        ? 'No bill matches that in the recent-activity window. If you know the bill number, search that instead — it resolves any bill directly.'
+        : 'No election-related bills found in the current window of congressional activity.'}</div>` : ''}
+
+      <p class="attribution" style="padding-top:1rem">${q
+        ? `Searched the titles of the ${data.coverage != null ? `${data.coverage} ` : ''}most recently-updated bills of the ${data.congress}th Congress. Congress.gov has no keyword search, so a name search covers recent activity only — <strong>searching by bill number resolves any bill</strong>, however long it has been sitting.`
+        : `Assembled from the most recently-updated bills of the ${data.congress}th Congress${data.coverage != null ? ` (${data.coverage} scanned)` : ''}, filtered to election-related legislation by title. Title matching is coarse: it catches bills that announce themselves as election bills, and misses election provisions tucked inside broadly-titled ones. It is a starting point, not a complete census.`}</p>
+    </section>
+  `;
+
+  document.getElementById('bill-form').addEventListener('submit', (e) => {
+    e.preventDefault();
+    const val = document.getElementById('bill-input').value.trim();
+    location.hash = val ? `#/bills?q=${encodeURIComponent(val)}` : '#/bills';
+  });
+
+  app.querySelectorAll('.quick-bill').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      location.hash = `#/bills?q=${encodeURIComponent(btn.dataset.q)}`;
+    });
+  });
+}
+
+async function viewBill(congress, type, number) {
+  const b = await api.bill(congress, type, number);
+  const split = b.cosponsors?.partySplit;
+
+  app.innerHTML = `
+    ${backLink('#/bills', 'Back to bills')}
+
+    <article class="detail-card">
+      <div class="detail-band">
+        <p class="eyebrow">${esc(b.label)} · ${esc(String(b.congress))}th Congress${b.policyArea ? ` · ${esc(b.policyArea)}` : ''}</p>
+        <h1>${esc(b.title)}</h1>
+      </div>
+      <dl class="detail-meta">
+        <div><dt>Status</dt><dd>${esc(b.stage?.label || '—')}</dd></div>
+        ${b.introducedDate ? `<div><dt>Introduced</dt><dd>${fmtDate(b.introducedDate)}</dd></div>` : ''}
+        ${b.sponsor ? `<div><dt>Sponsor</dt><dd>${esc(b.sponsor.name)}</dd></div>` : ''}
+        <div><dt>Cosponsors</dt><dd>${b.cosponsors?.count ?? 0}${split ? ` <small>(${split.D}D · ${split.R}R${split.other ? ` · ${split.other} other` : ''})</small>` : ''}</dd></div>
+      </dl>
+      ${stageRail(b.stage)}
+      ${b.laws?.length ? noteBox(`Enacted as ${b.laws.join(', ')}.`) : ''}
+      ${b.latestAction ? `<p class="detail-desc"><strong>Latest action${b.latestAction.date ? ` (${fmtDate(b.latestAction.date)})` : ''}:</strong> ${esc(b.latestAction.text)}</p>` : ''}
+    </article>
+
+    ${billQaSection(b)}
+
+    ${b.summary ? `
+    <section class="section">
+      <div class="section-head">
+        <h2>What it does</h2>
+        <span class="count">Congressional Research Service${b.summary.asOf ? ` · as of ${fmtDate(b.summary.asOf)}` : ''}</span>
+      </div>
+      <div class="bill-summary">${b.summary.text.split(/\n{2,}/).map((p) => `<p>${esc(p)}</p>`).join('')}</div>
+      <p class="attribution" style="padding-top:0.5rem">Summaries are written by the Congressional Research Service — nonpartisan staff at the Library of Congress — and describe the bill as introduced or as amended at the stage noted, which may not be its current text.</p>
+    </section>` : `
+    <section class="section">
+      <div class="section-head"><h2>What it does</h2></div>
+      <div class="empty">No Congressional Research Service summary has been published for this bill yet — that usually means it was introduced recently. The full text and action history are on congress.gov, linked below.</div>
+    </section>`}
+
+    ${(b.actions || []).length ? `
+    <section class="section">
+      <div class="section-head"><h2>What's happened so far</h2><span class="count">Most recent first</span></div>
+      <div class="action-list">
+        ${b.actions.map((a) => `
+          <div class="action-line">
+            <span class="action-date">${a.date ? fmtDate(a.date) : '—'}</span>
+            <span class="action-text">${esc(a.text)}${a.chamber ? ` <small>${esc(a.chamber)}</small>` : ''}</span>
+          </div>`).join('')}
+      </div>
+    </section>` : ''}
+
+    ${(b.subjects || []).length ? `
+    <section class="section">
+      <div class="section-head"><h2>Subjects</h2></div>
+      <div class="values-grid">
+        ${b.subjects.map((s) => `<div class="value-item"><span class="oval"></span>${esc(s)}</div>`).join('')}
+      </div>
+    </section>` : ''}
+
+    <section class="section">
+      <div class="section-head"><h2>Go deeper</h2></div>
+      <div class="links-row">
+        <a class="deep-link" href="${safeHref(b.url)}" target="_blank" rel="noopener">Full record on Congress.gov ↗</a>
+      </div>
+    </section>
+
+    <p class="provenance">Bill status, sponsor, actions and summary from Congress.gov (Library of Congress), fetched live. Status labels are derived from the latest action text — congress.gov is authoritative.</p>
+  `;
+
+  setupQa({
+    storeKey: `pb-ai-bill-${b.congress}-${b.type}-${b.number}`,
+    ask: (question, history) => api.askBill(b.congress, b.type, b.number, question, history),
+    emptyMsg: 'No questions yet — ask what this bill would change, who supports it, or where it stands.',
+  });
+}
+
 async function viewCommittee(id) {
   const c = await api.committee(id);
   const support = c.independent?.support || [];
@@ -908,6 +1311,8 @@ const routes = [
   { match: /^#\/search/, view: (h) => viewSearch(new URLSearchParams(h.split('?')[1] || '')), route: 'search' },
   { match: /^#\/pacs/, view: (h) => viewPacs(new URLSearchParams(h.split('?')[1] || '')), route: 'pacs' },
   { match: /^#\/committee\/([\w-]+)/, view: (h, m) => viewCommittee(m[1]), route: 'pacs' },
+  { match: /^#\/bill\/(\d+)\/([a-z]+)\/(\d+)/, view: (h, m) => viewBill(m[1], m[2], m[3]), route: 'bills' },
+  { match: /^#\/bills/, view: (h) => viewBills(new URLSearchParams(h.split('?')[1] || '')), route: 'bills' },
 ];
 
 /** Loud, permanent warning whenever the server isn't serving real data. */
