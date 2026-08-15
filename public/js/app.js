@@ -274,10 +274,31 @@ const loadQaHistory = (id) => {
 const saveQaHistory = (id, history) =>
   localStorage.setItem(qaKey(id), JSON.stringify(history.slice(-40)));
 
+/**
+ * esc() escapes quotes but would happily pass through `javascript:` — and
+ * these URLs come from web search results, i.e. from strangers. Only http(s)
+ * reaches an href.
+ */
+const safeHref = (u) => (/^https?:\/\//i.test(String(u ?? '')) ? esc(u) : '#');
+
+const qaSourcesHtml = (sources) => {
+  const list = (sources || []).filter((s) => s && s.url).slice(0, 6);
+  if (!list.length) return '';
+  return `
+    <div class="qa-sources">
+      <span class="qa-sources-label">Sources</span>
+      <ol>
+        ${list.map((s) => `
+          <li><a href="${safeHref(s.url)}" target="_blank" rel="noopener noreferrer nofollow" title="${esc(s.title || s.url)}">${esc(s.outlet || s.title || s.url)}</a>${s.date ? ` <span class="qa-source-date">${esc(s.date)}</span>` : ''}</li>`).join('')}
+      </ol>
+    </div>`;
+};
+
 const qaMsgHtml = (m) => `
   <div class="qa-msg qa-msg--${m.role === 'user' ? 'user' : 'ai'}${m.pending ? ' qa-msg--pending' : ''}">
     <span class="qa-msg-role">${m.role === 'user' ? 'You' : 'Pollbook AI'}</span>
     <p>${esc(m.content)}</p>
+    ${m.role === 'user' ? '' : qaSourcesHtml(m.sources)}
   </div>`;
 
 function renderQaLog(id) {
@@ -309,11 +330,14 @@ function setupCandidateQa(id) {
     input.disabled = true;
     renderQaLog(id);
     document.getElementById('qa-log').insertAdjacentHTML('beforeend',
-      qaMsgHtml({ role: 'assistant', content: 'Thinking…', pending: true }));
+      qaMsgHtml({ role: 'assistant', content: 'Thinking… this may take a few seconds if it needs to search.', pending: true }));
 
     try {
-      const { answer } = await api.askCandidate(id, question, historyForRequest);
-      saveQaHistory(id, [...history, { role: 'assistant', content: answer }]);
+      const { answer, sources } = await api.askCandidate(id, question, historyForRequest);
+      // Sources are persisted alongside the answer so citations survive a
+      // reload — the server re-maps history to {role, content}, so this extra
+      // key is never echoed back into the prompt.
+      saveQaHistory(id, [...history, { role: 'assistant', content: answer, sources: (sources || []).slice(0, 6) }]);
     } catch (err) {
       saveQaHistory(id, [...history, { role: 'assistant', content: `Couldn't get an answer — ${err.message}` }]);
     } finally {
@@ -337,7 +361,7 @@ const candidateQaSection = (c) => `
       <span class="qa-callout-tag">U.S. elections only</span>
     </div>
     <div class="qa-callout-body">
-      <p class="qa-note">Grounded in this candidate's Pollbook profile — FEC filings, Wikipedia, news. It only discusses United States elections and candidates, and refuses anything else. It can get things wrong; verify anything that matters. Your conversation stays in this browser, never on our server.</p>
+      <p class="qa-note">Grounded in this candidate's Pollbook profile — FEC filings, Wikipedia, news — and it searches the web when the profile doesn't cover your question, listing the sources it used. It only discusses United States elections and candidates, and refuses anything else. It can get things wrong; verify anything that matters. Your conversation stays in this browser, never on our server.</p>
       <div class="qa-log" id="qa-log"></div>
       <form id="qa-form" class="qa-form">
         <input id="qa-input" type="text" placeholder="e.g. What are their views on healthcare?" autocomplete="off" aria-label="Ask a question about this candidate" />

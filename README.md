@@ -54,13 +54,22 @@ The PAC tracker searches any committee and shows who it funds and opposes. Commi
 | `FEC_API_KEY` | `DEMO_KEY` | OpenFEC key — get one free at api.open.fec.gov/developers. Strongly recommended: the funding panels make several FEC calls per candidate page, and `DEMO_KEY` allows only 30/hour across all users. |
 | `FEC_API_BASE` | OpenFEC v1 | Override the API base — used by `test/pagination.js` to run against a stub. |
 | `GROQ_API_KEY` | none | Enables the "Ask about this candidate" AI panel. Free key at [console.groq.com/keys](https://console.groq.com/keys). Without it, that panel returns a plain error and the rest of the app is unaffected. |
-| `GROQ_MODEL` | `llama-3.3-70b-versatile` | Groq model used for candidate Q&A. |
+| `GROQ_MODEL` | `llama-3.3-70b-versatile` | Groq model used for candidate Q&A. Must support tool calling, or web search silently never fires. |
 | `GROQ_API_BASE` | Groq's OpenAI-compatible endpoint | Override the API base (e.g. for testing against a stub). |
+| `TAVILY_API_KEY` | none | Enables real web search for the Q&A panel. Free key at [tavily.com](https://tavily.com). Without it the panel falls back to keyless Google News RSS — headlines only, no page text. |
+| `TAVILY_API_BASE` | `https://api.tavily.com` | Override the search API base — used by `test/qa.js` to run against a stub. |
+| `QA_BUDGET_MS` | `25000` | Total wall-clock budget for one AI answer, searches included. The route is a blocking POST, so this is what stands between a slow model and a proxy timeout. |
 | `PUBLIC_BASE_URL` | inferred per request | Canonical origin (e.g. `https://pollbook.example`) used for the OpenGraph/canonical URLs. Unset, the server derives it from the request's forwarded host — correct on Render, but pin it if you serve the app behind a CDN or a custom domain alias. |
 
 ### Candidate Q&A (AI)
 
 Every candidate page has an "Ask about this candidate" panel, backed by [Groq](https://groq.com) (free-tier chat completions). It's grounded in that candidate's Pollbook profile — FEC filings, Wikipedia bio/positions, recent headlines — and a system prompt that keeps it strictly nonpartisan and scoped to U.S. elections: any question outside U.S. elections/candidates gets a fixed refusal ("I only give information on United States elections and their candidates.") instead of an answer. Conversation history is kept in the browser's `localStorage` only (`pb-ai-<candidateId>`) — nothing is stored server-side, and there's a "Clear conversation" button per candidate.
+
+**Web search.** The profile is a thin slice of a candidate — a bio, a few positions, five headlines — so grounding the model in it alone meant most real questions ("what's the latest polling?", "how did she vote on that bill?") hit the anti-hallucination rule and came back as *"I don't have that information."* The model is now given a `search_web` tool and decides for itself when to reach for it: profile-answerable questions cost one completion as before, and only questions that need current information pay for a search. Searches are capped at 2 per question, results cached for 15 minutes, and the whole exchange is bounded by `QA_BUDGET_MS`. Out-of-scope questions are refused *before* a search is spent.
+
+Answers come back with the sources consulted, rendered as links under the reply and persisted with the conversation — on a nonpartisan election site, a claim the model pulled off the open web should be checkable.
+
+**Treating search results as hostile.** Anyone who can rank for a candidate's name can put text in front of this model, and the realistic harm here is a partisan claim laundered through an assistant users expect to be neutral. Retrieved text is fenced accordingly: it enters only as a `role: "tool"` message (never as a system or user turn), between sentinels that label it untrusted data; control characters, zero-width characters and chat-template tokens (`<|im_start|>`, `[INST]`) are stripped at the source; snippets are capped at 500 characters and each tool message at 4,000; and non-`http(s)` URLs are dropped both server-side and again before any `href` is rendered. This is mitigation, not a guarantee — the visible source list is the part that makes a bad answer auditable.
 
 ## Brand assets and link previews
 
@@ -106,6 +115,7 @@ src/sources/fec.js                 FEC candidates, finance, search
 src/sources/markets.js             PredictIt odds + candidate matching
 src/sources/wikipedia.js           Bio + political-positions extraction
 src/sources/news.js                Google News RSS
+src/sources/webSearch.js           Web search for Q&A (Tavily, Google News RSS fallback)
 public/                            Vanilla frontend (hash-routed SPA)
 public/logo.svg                    Master mark — source for every icon
 scripts/generate-assets.js         Regenerates favicons + og-image.png from it
@@ -120,7 +130,7 @@ scripts/og-template.html           Layout of the 1200×630 link-preview card
 | `GET /api/elections?state=GA&scope=state` | Upcoming election summaries |
 | `GET /api/elections/:id` | Detail with races, candidates, fundraising, market odds |
 | `GET /api/candidates/:id` | Bio, policy positions, finance, news, odds, links |
-| `POST /api/candidates/:id/ask` | AI answer to a question about this candidate (Groq, needs `GROQ_API_KEY`). Body: `{ question, history }`; history stays client-side. |
+| `POST /api/candidates/:id/ask` | AI answer to a question about this candidate (Groq, needs `GROQ_API_KEY`). Body: `{ question, history }`; history stays client-side. Returns `{ answer, sources }`, where `sources` are the web pages consulted (empty when the profile alone sufficed). |
 | `GET /api/stats?state=GA` | Campaign-finance snapshot (top fundraisers) |
 | `GET /api/search?q=name` | Candidate search across all filed federal candidates |
 | `GET /api/committees?q=aipac` | PAC/super-PAC search (alias-aware: AIPAC also finds United Democracy Project) |
