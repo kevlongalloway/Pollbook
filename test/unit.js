@@ -189,4 +189,39 @@ test('aggregates recipients by committee', () => {
   assert.strictEqual(agg[0].name, 'Smith For Senate');
 });
 
+test('aggregates earmarked money by conduit (the AIPAC mechanism)', () => {
+  const rows = [
+    // Bundled donations naming the conduit committee.
+    { contribution_receipt_amount: 2900, donor_committee_name: 'AIPAC PAC' },
+    { contribution_receipt_amount: 3300, donor_committee_name: 'AIPAC PAC' },
+    // Conduit only named in the memo text.
+    { contribution_receipt_amount: 1000, memo_text: 'EARMARKED THROUGH ACTBLUE (C00401224)' },
+    { contribution_receipt_amount: 500, memo_text: 'Earmarked via ActBlue' },
+    // Ordinary individual money — no conduit, must be excluded.
+    { contribution_receipt_amount: 250, memo_text: '' },
+    { contribution_receipt_amount: 900 },
+    // Refund must be excluded.
+    { contribution_receipt_amount: -100, donor_committee_name: 'AIPAC PAC' },
+  ];
+  const agg = fec.aggregateEarmarks(rows);
+  assert.strictEqual(agg.length, 2);
+  assert.strictEqual(agg[0].name, 'Aipac Pac');
+  assert.strictEqual(agg[0].total, 6200);
+  assert.strictEqual(agg[0].count, 2);
+  assert.strictEqual(agg[1].name, 'Actblue');
+  assert.strictEqual(agg[1].total, 1500);
+});
+
+test('PAC aggregation totals repeated max-out checks across the cycle', () => {
+  // Real PAC giving clusters at the $5k legal cap — the point of full
+  // pagination is that the same PAC's repeated checks sum correctly.
+  const rows = Array.from({ length: 4 }, () => ({
+    contributor_name: 'REALTORS PAC', contributor_id: 'C00030718', contribution_receipt_amount: 5000,
+  }));
+  const agg = fec.aggregateContributors(rows);
+  assert.strictEqual(agg.length, 1);
+  assert.strictEqual(agg[0].total, 20000);
+  assert.strictEqual(agg[0].count, 4);
+});
+
 console.log(`${passed} tests passed${process.exitCode ? ' (with failures)' : ''}`);

@@ -168,7 +168,11 @@ module.exports = {
       : `${officeName} — ${st ? st.name : base.state}`;
 
     const cycle = calendar.currentCycle();
-    const [finance, wiki, articles, raceMarkets, topPacs, independent] = await Promise.all([
+    // Each funding view fails independently — a missing panel should never
+    // take down the rest of the profile.
+    const soft = (p) => p.catch(() => { sources.funding = 'partial'; return []; });
+    const [finance, wiki, articles, raceMarkets,
+      topPacs, independent, employers, donorSizes, earmarked] = await Promise.all([
       fec.candidateFinance(id).catch(() => { sources.finance = 'error'; return null; }),
       wikipedia.profileFor(base.name, { state: st?.name, officeFull: base.officeFull })
         .catch(() => { sources.wikipedia = 'error'; return null; }),
@@ -176,10 +180,11 @@ module.exports = {
       base.office === 'S' || base.office === 'H'
         ? markets.marketsForRace(base.state, base.office, cycle)
         : Promise.resolve([]),
-      fec.candidatePacContributions(id, cycle)
-        .catch(() => { sources.funding = 'error'; return []; }),
-      fec.candidateIndependentSpending(id, cycle)
-        .catch(() => { sources.funding = 'error'; return []; }),
+      soft(fec.candidatePacContributions(id, cycle)),
+      soft(fec.candidateIndependentSpending(id, cycle)),
+      soft(fec.candidateEmployerMoney(id, cycle)),
+      soft(fec.candidateDonorSizes(id, cycle)),
+      soft(fec.candidateEarmarked(id, cycle)),
     ]);
     if (!sources.funding) sources.funding = 'ok';
 
@@ -201,6 +206,9 @@ module.exports = {
       finance,
       funding: {
         topPacs,
+        employers,
+        donorSizes,
+        earmarked,
         independent: {
           support: independent.filter((r) => r.support),
           oppose: independent.filter((r) => !r.support),

@@ -994,6 +994,24 @@ a { color: inherit; }
 
 .deep-link:hover { background: var(--yellow); }
 
+/* ---------- sample-data banner ---------- */
+
+.mode-banner {
+  background: #B3231F;
+  color: var(--white);
+  padding: 0.7rem var(--gutter);
+  font-size: 0.85rem;
+  line-height: 1.4;
+  border-bottom: var(--rule);
+}
+
+.mode-banner code {
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  background: rgba(0, 0, 0, 0.28);
+  padding: 0.05rem 0.3rem;
+}
+
 /* ---------- money lines (PAC tracker + funding) ---------- */
 
 .money-list { display: flex; flex-direction: column; }

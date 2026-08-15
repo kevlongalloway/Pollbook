@@ -81,7 +81,8 @@ module.exports = {
       return { raceId: r.id, office: r.office, electionId: e?.id, electionName: e?.name, date: e?.date };
     });
 
-    // Deterministic fictional funding so the money UI is exercisable offline.
+    // Fictional funding so the money UI is exercisable offline. Names are
+    // explicitly marked SAMPLE so seed figures can never be read as filings.
     const seed = c.id.length + c.name.length;
     return {
       ...c,
@@ -89,13 +90,24 @@ module.exports = {
       positions: (c.coreValues || []).map((v) => ({ topic: v, text: '' })),
       funding: {
         topPacs: [
-          { name: 'Placeholder Growth PAC', committeeId: 'mock-pac-growth', total: 5000 + seed * 100, count: 2 },
-          { name: 'Fictional Futures Committee', committeeId: 'mock-pac-futures', total: 2500 + seed * 50, count: 1 },
+          { name: '[SAMPLE] Growth PAC', committeeId: 'mock-pac-growth', total: 10000, count: 2 },
+          { name: '[SAMPLE] Futures Committee', committeeId: 'mock-pac-futures', total: 5000, count: 1 },
+        ],
+        employers: [
+          { employer: '[SAMPLE] Regional Health System', total: 82000 + seed * 700, count: 140 },
+          { employer: '[SAMPLE] State University', total: 51000 + seed * 400, count: 96 },
+        ],
+        donorSizes: [
+          { size: 0, label: 'Under $200', total: 320000 + seed * 900 },
+          { size: 2000, label: '$2,000 and up', total: 610000 + seed * 400 },
+        ],
+        earmarked: [
+          { name: '[SAMPLE] Advocacy Network', total: 145000 + seed * 500, count: 210 },
         ],
         independent: {
-          support: [{ committeeId: 'mock-super-blue', committee: 'Placeholder Priorities Super PAC', total: 240000 + seed * 1000, support: true }],
+          support: [{ committeeId: 'mock-super-blue', committee: '[SAMPLE] Priorities Super PAC', total: 240000 + seed * 1000, support: true }],
           oppose: seed % 2
-            ? [{ committeeId: 'mock-super-red', committee: 'Imaginary Values Fund', total: 180000 + seed * 900, support: false }]
+            ? [{ committeeId: 'mock-super-red', committee: '[SAMPLE] Values Fund', total: 180000 + seed * 900, support: false }]
             : [],
         },
       },
