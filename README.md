@@ -74,6 +74,14 @@ The PAC tracker searches any committee and shows who it funds and opposes. Commi
 
 **If figures look fake, check the provider.** `GET /api/meta` reports which provider is serving the instance, and the UI shows a red banner across every page when it isn't `live`. Seed data is additionally prefixed `[SAMPLE]`.
 
+`/api/meta` also reports whether each metered upstream is running on its own key or the shared demo one:
+
+```json
+{ "provider": "live", "live": true, "fecKey": "configured", "congressKey": "configured", "webSearch": "tavily" }
+```
+
+`"congressKey": "DEMO_KEY"` means `CONGRESS_API_KEY` isn't reaching the process — check it after a deploy, since the demo key's 30-requests-per-hour ceiling shows up as a bills page that intermittently comes back empty rather than as an obvious error. The Bills page says so itself in that state.
+
 ## Bills before Congress
 
 Elections aren't only decided at the ballot box — Congress writes the rules for

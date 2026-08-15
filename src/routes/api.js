@@ -31,6 +31,7 @@ router.get('/meta', (req, res) => {
     provider,
     live: provider === 'live',
     fecKey: process.env.FEC_API_KEY ? 'configured' : 'DEMO_KEY',
+    congressKey: process.env.CONGRESS_API_KEY ? 'configured' : 'DEMO_KEY',
     webSearch: webSearch.provider(),
   });
 });

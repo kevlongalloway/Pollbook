@@ -1102,6 +1102,9 @@ async function viewBills(params) {
   }
 
   const down = data.sources && data.sources.congress === 'error';
+  // Only worth saying on a live instance: in mock mode nothing is fetched, and
+  // the red sample-data banner is already the louder warning.
+  const demoKey = state.meta.live && state.meta.congressKey === 'DEMO_KEY';
   const QUICK = ['SAVE Act', 'HR 22', 'voting rights', 'redistricting', 'campaign finance'];
 
   app.innerHTML = `
@@ -1123,6 +1126,7 @@ async function viewBills(params) {
 
       ${error ? noteBox(error) : ''}
       ${down ? noteBox('Live legislative data (Congress.gov) is unreachable right now. This list will fill in automatically once the connection recovers.') : ''}
+      ${demoKey ? noteBox('This instance is running on the shared Congress.gov demo key, which allows only 30 requests an hour across everyone using it — so the bill list and individual bill pages will intermittently come up short or empty. Setting CONGRESS_API_KEY (free, instant, from api.congress.gov/sign-up) fixes it.') : ''}
 
       ${data.bills.length ? `<div class="bill-list">${data.bills.map(billLine).join('')}</div>` : ''}
 
