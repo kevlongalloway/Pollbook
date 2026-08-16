@@ -3,6 +3,10 @@
  * transform external API payloads, using realistic fixtures. Run: npm test
  */
 
+// Hermetic: never read or write the on-disk cache snapshot from a test run.
+process.env.CACHE_PERSIST = '0';
+
+
 const assert = require('node:assert');
 const calendar = require('../src/lib/calendar');
 const fec = require('../src/sources/fec');

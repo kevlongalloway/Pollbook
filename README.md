@@ -8,8 +8,13 @@ Election awareness app covering **all 50 states + DC** — upcoming elections, w
 npm install
 npm start          # http://localhost:3000 — live data, works with zero config
 npm run dev        # auto-restart on change (Node 18+)
-npm test           # offline unit tests (calendar math, parsers)
+npm test           # 87 tests, fully offline — every upstream is stubbed
 ```
+
+The suite never touches the network: `unit` covers date math and parsers,
+`pagination` and `bills` run the FEC and Congress.gov sources against local
+stubs, `qa` does the same for the AI panels, `cache` pins the behaviour under
+upstream failure, and `routes` exercises the real Express app end to end.
 
 Deploys straight to Render as a Node web service (`npm start`, port from `PORT` env).
 
@@ -68,6 +73,20 @@ aggregate covers a different window than the individual total and can exceed
 it — the split is dropped rather than forced, and the reason is printed under
 the chart.
 
+Race pages carry a **side-by-side comparison** of the money behind every
+candidate in a race, on one shared scale — raised by the campaign, spent for
+them from outside, spent against them. A single candidate's diagram answers
+"where does their money come from"; this answers the question people actually
+arrive with, which is who is being carried by outside money and who is being
+buried by it. It loads on demand, since a full profile is several FEC calls
+and most visitors to a race page never ask.
+
+The diagram is mirrored by a visually-hidden data table. A long `aria-label`
+is a poor substitute for a chart — it's read as one unstoppable sentence with
+no way to navigate between figures — and the distinction the diagram exists to
+make, money *into* the campaign versus money spent *about* the candidate,
+survives in the table as two labelled sections.
+
 > **Implementation note:** the FEC rejects deep page-number paging on itemized schedules, so Schedule A is walked with keyset pagination (`pagination.last_indexes`). Aggregating a single page — as an early version did — returns an arbitrary slice of identically-sized max-out checks and produces near-identical totals for every candidate. `test/pagination.js` guards this against a local stub that mimics the cursor behaviour.
 
 The PAC tracker searches any committee and shows who it funds and opposes. Committee-name searches expand through a small, documented alias table of publicly reported affiliations (e.g. AIPAC ↔ United Democracy Project) so an organization's whole footprint surfaces. Registered *lobbying* (LDA filings — who lobbies Congress on which bills) is a separate disclosure system; the tracker links to lda.senate.gov and OpenSecrets for that.
@@ -95,18 +114,25 @@ do?" on a site like this one.
 
 **Congress.gov has no keyword search.** The v3 API addresses bills by congress,
 type and number and lists them by update date; there is no `q` parameter. So
-the page works two ways, and says which one it just did:
+discovery runs on three channels, and the page says which one found what:
 
-1. **The feed** walks a window of the most recently-updated bills in the current
-   Congress and filters it to election-related legislation by matching titles.
-   Title matching is coarse — it catches bills that announce themselves as
-   election bills and misses election provisions tucked inside broadly-titled
-   ones — so the page calls it a starting point, not a census. The matcher is
-   word-boundary anchored so "Natural Selection Research Act" doesn't match
-   "election".
-2. **Bill-number lookup** resolves any bill directly, however long it has been
+1. **Titles** of the most recently-updated bills. Cheap and current, but coarse
+   — it only catches bills that announce themselves as election bills. The
+   matcher is word-boundary anchored so "Natural Selection Research Act"
+   doesn't match "election".
+2. **CRS summary text** of recently-published summaries. This is what catches
+   the bills that matter most: an election provision folded into an
+   appropriations package names nothing in its title, and those are precisely
+   the ones that pass. Summary matches are labelled in the UI, because a phrase
+   can be incidental to a bill that is mostly about something else. Summaries
+   lag introduction by weeks, so this complements titles rather than replacing
+   them — a bill has no summary until CRS writes one.
+3. **Bill-number lookup** resolves any bill directly, however long it has been
    sitting. `HR 22`, `H.R. 22`, `hr22` and `S.J.Res. 2` all parse. This is what
    makes a specific bill findable when it has dropped out of the window.
+
+The two window channels fail independently: losing either leaves the page
+working on whatever the other found.
 
 A small watchlist (`src/data/electionBills.js`) pins landmark bills — the SAVE
 Act among them — so they stay on the page after they go quiet. Only the bill
@@ -138,6 +164,41 @@ particular people ("supporters say…") rather than as settled fact — the line
 that matters on a nonpartisan site. Anything outside U.S. legislation and
 elections gets a fixed refusal.
 
+## Staying up under load and outage
+
+Two properties that took real bugs to get right, both covered by tests.
+
+**The AI endpoints are rate limited.** `/ask` reaches Groq and a search
+provider on every request — both metered, neither behind auth — so a loop
+against one page could drain the day's quota and take the panels down for
+everyone. Two ceilings apply: per-IP, which stops one caller monopolizing the
+service, and a global cap, which is what actually protects the quota since
+per-IP limits do nothing against a botnet. Both Q&A panels share one budget,
+so the ceiling doesn't double each time a panel is added, and read endpoints
+have their own generous limit so browsing keeps working once the AI budget is
+spent.
+
+This depends on `trust proxy` being set correctly (`server.js`). Without it
+`req.ip` is the load balancer's address and every visitor shares one bucket;
+trusting *every* hop instead would let a caller spoof `X-Forwarded-For` and
+mint a fresh bucket per request. It's set to `1` — trust exactly one hop —
+which is right for Render and for most single-proxy hosts.
+
+**The cache doesn't amplify an outage.** It used to: a failed fetch deleted the
+entry, so the next request retried immediately. Against a 429 that meant every
+page load spent another request on an already-exhausted limit, and traffic made
+the outage worse instead of riding it out. Demo keys allow 30 requests an hour,
+so this was reachable in ordinary use. Failures now hold a short cooldown, and
+the stale-on-error path holds its value for that cooldown too rather than
+restoring an already-past expiry — the same bug in a second place, which the
+tests caught and prose review had not.
+
+A debounced snapshot on disk means a restart starts warm instead of hammering
+every upstream at once. It's written atomically and size-capped, and a
+read-only or full disk simply falls back to starting cold. By default it lives
+in the OS temp directory, which survives a process restart within a container
+but not a redeploy — point `CACHE_FILE` at a mounted volume if you want it to.
+
 ## Configuration
 
 | Env | Default | Purpose |
@@ -148,7 +209,14 @@ elections gets a fixed refusal.
 | `FEC_API_BASE` | OpenFEC v1 | Override the API base — used by `test/pagination.js` to run against a stub. |
 | `CONGRESS_API_KEY` | `DEMO_KEY` | Congress.gov key — free at [api.congress.gov/sign-up](https://api.congress.gov/sign-up/). Recommended: the bills feed makes several calls per refresh, and api.data.gov's `DEMO_KEY` allows only 30/hour per IP. |
 | `CONGRESS_API_BASE` | Congress.gov v3 | Override the API base — used by `test/bills.js` to run against a stub. |
-| `CONGRESS_FEED_PAGES` | `3` | Pages of 250 bills scanned to build the feed. Each page is one API call: more pages means better coverage and a bigger key budget. |
+| `CONGRESS_FEED_PAGES` | `3` | Pages of 250 bills scanned by title to build the feed. Each page is one API call: more pages means better coverage and a bigger key budget. |
+| `CONGRESS_SUMMARY_PAGES` | `2` | Pages of 250 CRS summaries scanned as the second discovery channel (see below). Same cost/coverage trade. |
+| `ASK_RATE_LIMIT` | `12` | AI questions allowed per IP per 10 minutes, across both Q&A panels combined. |
+| `ASK_RATE_LIMIT_GLOBAL` | `240` | AI questions allowed per 10 minutes across all callers — the ceiling that actually protects the Groq quota. |
+| `API_RATE_LIMIT` | `240` | Requests per IP per minute for everything else. Set to catch scrapers, not to shape ordinary use. |
+| `CACHE_PERSIST` | on | Set `0` to disable the on-disk cache snapshot. Tests set this automatically. |
+| `CACHE_FILE` | temp dir | Where the snapshot lives. Point it at a mounted volume to survive redeploys, not just restarts. |
+| `CACHE_FAILURE_TTL_MS` | `30000` | How long a failed upstream call is remembered before it's retried. |
 | `GROQ_API_KEY` | none | Enables the "Ask about this candidate" AI panel. Free key at [console.groq.com/keys](https://console.groq.com/keys). Without it, that panel returns a plain error and the rest of the app is unaffected. |
 | `GROQ_MODEL` | `llama-3.3-70b-versatile` | Groq model used for candidate Q&A. Any chat model works — search runs before the model is called, so tool-calling support is not required. |
 | `GROQ_API_BASE` | Groq's OpenAI-compatible endpoint | Override the API base (e.g. for testing against a stub). |
@@ -211,6 +279,7 @@ src/data/electionBills.js          Watchlist of landmark election bills (numbers
 src/lib/calendar.js                Statutory election-date math + congress numbering
 src/lib/cache.js                   TTL cache, stale-on-error
 src/lib/moneyFlow.js               Money-flow model: donor channels vs. outside spending, no double-counting
+src/lib/rateLimit.js               Per-IP and global ceilings on the metered AI endpoints
 src/lib/groq.js                    Groq chat-completions client (GROQ_API_KEY)
 src/lib/retrieval.js               Shared Q&A plumbing: untrusted-text fencing, history sanitizing
 src/lib/candidateQa.js             Candidate Q&A: grounds Groq in the candidate profile, enforces scope
@@ -249,6 +318,10 @@ scripts/og-template.html           Layout of the 1200×630 link-preview card
 Election IDs are stable and derived: `ga-general-2026`, `wy-primary-2026`, `us-general-2026`. Candidate IDs are FEC candidate IDs in live mode. Bills are addressed by their real coordinates — `119/hr/22` is H.R. 22 in the 119th Congress.
 
 ## Extending
+
+Larger planned work — SEO and real URLs, voting records, accounts and alerts,
+state-level coverage — is written up in [ROADMAP.md](ROADMAP.md), one section
+each with the reasoning and what's already in place.
 
 - **State/local races**: the provider interface is the contract — implement it against Google Civic (`googleCivicProvider.js` has the endpoint mapping plan), a state SoS scraper, or your own Postgres curation and set `DATA_PROVIDER`.
 - **More odds sources**: `src/sources/markets.js` isolates the PredictIt schema; add Polymarket or election forecasters behind the same `marketsForRace` shape.

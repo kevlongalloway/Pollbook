@@ -415,15 +415,8 @@ function moneyFlowSvg(mf) {
     height = y + 10;
   }
 
-  const alt = [
-    `Money flow for this campaign.`,
-    `Into the campaign: ${inflows.map((f) => `${f.label} ${fmtMoney(f.amount)}`).join(', ')}.`,
-    mf.campaign.conduits ? `Of the individual money, ${fmtMoney(mf.campaign.conduits.total)} was bundled through conduits.` : '',
-    mf.outside ? `Spent separately about this candidate, never touching the campaign: ${fmtMoney(mf.outside.support.total)} supporting, ${fmtMoney(mf.outside.oppose.total)} opposing.` : '',
-  ].filter(Boolean).join(' ');
-
   return `
-    <svg class="mf-svg" viewBox="0 0 ${W} ${height}" role="img" aria-label="${esc(alt)}" preserveAspectRatio="xMidYMin meet">
+    <svg class="mf-svg" viewBox="0 0 ${W} ${height}" role="img" aria-label="Diagram of this campaign's funding. The same figures are in the table that follows." preserveAspectRatio="xMidYMin meet">
       <defs>
         <pattern id="pb-hatch" patternUnits="userSpaceOnUse" width="6" height="6" patternTransform="rotate(45)">
           <rect width="6" height="6" fill="#FDFDFB" fill-opacity="0.25" />
@@ -432,6 +425,44 @@ function moneyFlowSvg(mf) {
       </defs>
       ${parts.join('')}
     </svg>`;
+}
+
+/**
+ * The same numbers as a table, visually hidden.
+ *
+ * A long aria-label is a poor substitute for a chart: it's read as one
+ * unstoppable sentence with no way to navigate between figures or re-hear a
+ * single one. A table gives real structure — and the distinction the diagram
+ * is built to make, money *into* the campaign versus money spent *about* the
+ * candidate, survives as two labelled sections rather than a clause a listener
+ * has to hold in their head.
+ */
+function moneyFlowTable(mf) {
+  const row = (label, amount, note) =>
+    `<tr><th scope="row">${esc(label)}</th><td>${fmtMoney(amount)}</td><td>${esc(note || '')}</td></tr>`;
+
+  const conduits = mf.campaign.conduits;
+
+  return `
+    <table class="visually-hidden mf-table">
+      <caption>Campaign funding${mf.coverageEnd ? `, from FEC filings through ${fmtDate(mf.coverageEnd)}` : ''}</caption>
+      <thead><tr><th scope="col">Source</th><th scope="col">Amount</th><th scope="col">Notes</th></tr></thead>
+      <tbody>
+        <tr><th scope="row" colspan="3">Money into the campaign — total ${fmtMoney(mf.campaign.raised)}</th></tr>
+        ${mf.campaign.inflows.map((f) =>
+    row(f.label, f.amount, `${flowPct(f.share)} of money raised${f.note ? `. ${f.note}` : ''}`)).join('')}
+        ${conduits ? row(
+    'Bundled through a conduit', conduits.total,
+    'Included in the individual-donor figures above, not additional to them'
+  ) : ''}
+        ${mf.outside ? `
+          <tr><th scope="row" colspan="3">Spent about this candidate, never touching the campaign — total ${fmtMoney(mf.outside.total)}</th></tr>
+          ${mf.outside.support.total ? row('Outside spending supporting them', mf.outside.support.total, 'Independent expenditure') : ''}
+          ${mf.outside.oppose.total ? row('Outside spending opposing them', mf.outside.oppose.total, 'Independent expenditure') : ''}` : ''}
+        ${mf.campaign.spent ? row('Spent by the campaign', mf.campaign.spent, '') : ''}
+        ${mf.campaign.cashOnHand ? row('Cash on hand', mf.campaign.cashOnHand, '') : ''}
+      </tbody>
+    </table>`;
 }
 
 const moneyFlowSection = (c) => {
@@ -446,6 +477,7 @@ const moneyFlowSection = (c) => {
         <span class="count">${mf.coverageEnd ? `FEC filings through ${fmtDate(mf.coverageEnd)}` : 'FEC filings, fetched live'}</span>
       </div>
       <div class="mf-wrap">${moneyFlowSvg(mf)}</div>
+      ${moneyFlowTable(mf)}
       <div class="mf-legend">
         ${conduits ? `
           <span class="mf-key"><span class="mf-swatch mf-swatch--hatch"></span>${fmtMoney(conduits.total)} of the individual money was bundled through a conduit${conduits.top.length ? ` — largest: ${esc(conduits.top[0].name)}` : ''}. It arrives as individual donations, so it is drawn inside those bands, not as money of its own.</span>` : ''}
@@ -458,12 +490,92 @@ const moneyFlowSection = (c) => {
     </section>`;
 };
 
+/* ---------------- race money comparison ---------------- */
+
+/**
+ * The money in a race, candidate by candidate, on one shared scale.
+ *
+ * A single candidate's diagram answers "where does their money come from".
+ * This answers the question people actually arrive with — "who is being
+ * carried by outside money, and is anyone being buried by it" — which is
+ * only visible side by side. Everything is measured against the largest
+ * single figure in the race, so the bars are comparable across candidates
+ * rather than each being normalized to itself.
+ *
+ * Loaded on demand: a full profile per candidate is several FEC calls, and
+ * most visitors to a race page never ask this.
+ */
+const CMP_KINDS = [
+  ['raised', 'Raised by the campaign', 'cmp-bar--raised'],
+  ['support', 'Outside spending for them', 'cmp-bar--for'],
+  ['oppose', 'Outside spending against them', 'cmp-bar--against'],
+];
+
+function raceCompareHtml(rows) {
+  const usable = rows.filter((r) => r.flow);
+  if (usable.length < 2) {
+    return `<div class="empty">Not enough of this race's candidates have filed financial reports yet to compare them.</div>`;
+  }
+
+  const valueOf = (flow, kind) => (kind === 'raised'
+    ? flow.campaign.raised
+    : (flow.outside ? flow.outside[kind].total : 0)) || 0;
+
+  const scale = Math.max(1, ...usable.flatMap((r) => CMP_KINDS.map(([k]) => valueOf(r.flow, k))));
+
+  return `
+    <div class="cmp-grid">
+      ${usable.map((r) => `
+        <div class="cmp-cand">
+          <div class="cmp-head">
+            <a href="#/candidate/${esc(r.id)}">${esc(r.name)}</a>
+            <span class="party party--${esc(r.party)}">${esc(PARTY_NAMES[r.party] || r.party)}</span>
+          </div>
+          ${CMP_KINDS.map(([kind, label, cls]) => {
+    const v = valueOf(r.flow, kind);
+    return `
+              <div class="cmp-row">
+                <span class="cmp-label">${esc(label)}</span>
+                <span class="cmp-track"><span class="cmp-bar ${cls}" style="width:${(v / scale) * 100}%"></span></span>
+                <span class="cmp-amt">${v ? fmtMoney(v) : '—'}</span>
+              </div>`;
+  }).join('')}
+        </div>`).join('')}
+    </div>
+    <p class="attribution" style="padding-top:0.75rem">All bars share one scale, so lengths are comparable between candidates. Outside spending never passes through a campaign's accounts — a candidate can be the target of the largest number here without controlling any of it. FEC filings, fetched live; candidates who have not filed are omitted.</p>`;
+}
+
+/** Load full profiles for a race's candidates and render the comparison. */
+async function loadRaceCompare(race, host) {
+  host.innerHTML = '<div class="empty">Loading the money in this race…</div>';
+  // Capped: each profile is several upstream calls, and beyond a handful the
+  // comparison stops being readable anyway.
+  const subjects = race.candidates.slice(0, 4);
+
+  const rows = await Promise.all(subjects.map(async (c) => {
+    try {
+      const full = await api.candidate(c.id);
+      return { id: c.id, name: c.name, party: c.party, flow: full.moneyFlow };
+    } catch {
+      // One unreachable profile shouldn't collapse the whole comparison.
+      return { id: c.id, name: c.name, party: c.party, flow: null };
+    }
+  }));
+
+  host.innerHTML = raceCompareHtml(rows);
+}
+
 const raceBlock = (r) => `
   <div class="race-block">
     <div class="race-office">${esc(r.office)}</div>
     ${r.candidates.length
       ? r.candidates.map(candLine).join('')
       : `<div class="race-empty">${esc(r.note || 'No candidate filings loaded for this race yet.')}</div>`}
+    ${r.candidates.length >= 2 ? `
+      <div class="race-compare">
+        <button type="button" class="deep-link race-compare-btn" data-race="${esc(r.id)}">Compare the money in this race</button>
+        <div class="race-compare-out" data-race-out="${esc(r.id)}"></div>
+      </div>` : ''}
     ${(r.markets || []).length ? marketPanel(r.markets[0]) : ''}
   </div>`;
 
@@ -812,6 +924,17 @@ async function viewElection(id) {
     </section>
   `;
 
+  app.querySelectorAll('.race-compare-btn').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const race = (e.races || []).find((r) => r.id === btn.dataset.race);
+      const host = app.querySelector(`[data-race-out="${CSS.escape(btn.dataset.race)}"]`);
+      if (!race || !host) return;
+      btn.disabled = true;
+      btn.remove();
+      loadRaceCompare(race, host);
+    });
+  });
+
   document.getElementById('track-btn').addEventListener('click', (ev) => {
     const btn = ev.currentTarget;
     if (state.tracked.has(e.id)) {
@@ -1085,7 +1208,7 @@ const billLine = (b) => `
     <span class="bill-num">${esc(b.label)}</span>
     <span class="bill-main">
       <span class="bill-title">${esc(b.title)}</span>
-      <span class="bill-meta">${esc(b.stage?.label || '')}${b.latestAction?.date ? ` · last action ${fmtDate(b.latestAction.date)}` : ''}${b.watchlisted ? ' · tracked' : ''}</span>
+      <span class="bill-meta">${esc(b.stage?.label || '')}${b.latestAction?.date ? ` · last action ${fmtDate(b.latestAction.date)}` : ''}${b.watchlisted ? ' · tracked' : ''}${b.matchedOn === 'summary' ? ' · matched on its summary, not its title' : ''}</span>
     </span>
     <span class="tag tag--stage-${esc(b.stage?.key || 'introduced')}">${esc(b.stage?.label || '')}</span>
   </a>`;
@@ -1135,8 +1258,8 @@ async function viewBills(params) {
         : 'No election-related bills found in the current window of congressional activity.'}</div>` : ''}
 
       <p class="attribution" style="padding-top:1rem">${q
-        ? `Searched the titles of the ${data.coverage != null ? `${data.coverage} ` : ''}most recently-updated bills of the ${data.congress}th Congress. Congress.gov has no keyword search, so a name search covers recent activity only — <strong>searching by bill number resolves any bill</strong>, however long it has been sitting.`
-        : `Assembled from the most recently-updated bills of the ${data.congress}th Congress${data.coverage != null ? ` (${data.coverage} scanned)` : ''}, filtered to election-related legislation by title. Title matching is coarse: it catches bills that announce themselves as election bills, and misses election provisions tucked inside broadly-titled ones. It is a starting point, not a complete census.`}</p>
+        ? `Searched the titles and published summaries of the ${data.coverage != null ? `${data.coverage} ` : ''}most recently-active bills of the ${data.congress}th Congress. Congress.gov has no keyword search, so a name search covers recent activity only — <strong>searching by bill number resolves any bill</strong>, however long it has been sitting.`
+        : `Assembled from the ${data.congress}th Congress's recent activity${data.coverage != null ? ` (${data.coverage} bills scanned)` : ''} two ways: bills whose <em>title</em> names an election subject, and bills whose Congressional Research Service <em>summary</em> does — which is how a provision buried in a broadly-titled bill shows up at all. Summary matches are labelled, because the phrase can be incidental to a bill that is mostly about something else. A bill has no summary until CRS writes one, so this is still a starting point rather than a complete census.`}</p>
     </section>
   `;
 

@@ -17,6 +17,10 @@
  * Run: node test/bills.js
  */
 
+// Hermetic: never read or write the on-disk cache snapshot from a test run.
+process.env.CACHE_PERSIST = '0';
+
+
 const assert = require('node:assert');
 const http = require('node:http');
 
@@ -81,6 +85,35 @@ const server = http.createServer((req, res) => {
     congressRequests.push(url.pathname);
     if (failPaths.has(url.pathname)) return res.writeHead(500).end('{}');
 
+    // The summaries channel: a bill whose title says nothing about elections
+    // but whose summary does — the case title matching alone cannot catch.
+    if (url.pathname === '/summaries/119') {
+      const offset = Number(url.searchParams.get('offset') || 0);
+      if (offset > 0) return send({ summaries: [] });
+      return send({
+        summaries: [
+          {
+            actionDate: '2026-02-01',
+            text: '<p>Division C of this Act appropriates funds for polling place accessibility and voter registration systems.</p>',
+            bill: {
+              congress: 119, type: 'HR', number: '5500',
+              title: 'Consolidated Appropriations Act, 2026',
+              latestAction: { actionDate: '2026-02-01', text: 'Referred to committee.' },
+            },
+          },
+          {
+            actionDate: '2026-02-02',
+            text: '<p>This bill designates a national park.</p>',
+            bill: {
+              congress: 119, type: 'S', number: '4400',
+              title: 'A bill to designate a national park',
+              latestAction: { actionDate: '2026-02-02', text: 'Referred to committee.' },
+            },
+          },
+        ],
+      });
+    }
+
     // Bill list, walked by offset.
     if (url.pathname === '/bill/119') {
       const offset = Number(url.searchParams.get('offset') || 0);
@@ -133,6 +166,10 @@ const server = http.createServer((req, res) => {
 const reset = () => {
   groqQueue = []; groqRequests.length = 0; searchRequests = [];
   congressRequests.length = 0; failPaths = new Set();
+  // The cache is module-level, so without this a test that makes an upstream
+  // fail would silently be served the previous test's successful response and
+  // pass for the wrong reason.
+  require('../src/lib/cache').clear();
 };
 
 /* ---------------- tests ---------------- */
@@ -310,6 +347,48 @@ const reset = () => {
     assert.strictEqual(new Set(ids).size, ids.length, 'a watchlisted bill that also matches must not appear twice');
   });
 
+  test('a bill whose title hides its election provisions is still found, and labelled', async () => {
+    reset();
+    const live = require('../src/providers/liveProvider');
+    const { bills } = await live.getBills({});
+
+    // "Consolidated Appropriations Act" names no election subject; only the
+    // CRS summary does. This is the bill class that actually passes.
+    const buried = bills.find((b) => b.id === '119-hr-5500');
+    assert.ok(buried, 'a bill matched only on its summary must appear');
+    assert.strictEqual(buried.matchedOn, 'summary', 'and must say how it was found');
+
+    // A summary that mentions no election subject stays out.
+    assert.ok(!bills.some((b) => b.id === '119-s-4400'), 'unrelated summaries must not match');
+
+    // Title matches are not downgraded to summary matches.
+    const byTitle = bills.find((b) => /voter registration/i.test(b.title));
+    assert.ok(byTitle && !byTitle.matchedOn, 'a title match should not be labelled');
+  });
+
+  test('bulky summary text is matched against but never shipped to the browser', async () => {
+    reset();
+    const live = require('../src/providers/liveProvider');
+    const feed = await live.getBills({});
+    const search = await live.getBills({ q: 'polling place' });
+
+    assert.ok(feed.bills.every((b) => !('summaryText' in b)), 'summaryText leaked into the feed payload');
+    assert.ok(search.bills.every((b) => !('summaryText' in b)), 'summaryText leaked into search results');
+    // Still searchable: the phrase appears only in the summary.
+    assert.ok(search.bills.some((b) => b.id === '119-hr-5500'), 'summary text should be searchable');
+  });
+
+  test('losing one discovery channel does not empty the page', async () => {
+    reset();
+    failPaths = new Set(['/summaries/119']);
+    const live = require('../src/providers/liveProvider');
+    const { bills, sources } = await live.getBills({});
+
+    assert.strictEqual(sources.summaries, 'error');
+    assert.strictEqual(sources.congress, 'ok');
+    assert.ok(bills.length > 0, 'the title channel should still carry the page');
+  });
+
   test('a bill-number query resolves directly instead of walking the window', async () => {
     reset();
     const live = require('../src/providers/liveProvider');
@@ -321,15 +400,21 @@ const reset = () => {
     assert.ok(!congressRequests.includes('/bill/119'), 'a number lookup should not walk the list');
   });
 
-  test('a name query searches titles and reports what it covered', async () => {
+  test('a name query searches titles and summaries, and reports what it covered', async () => {
     reset();
     const live = require('../src/providers/liveProvider');
     const { bills, mode, coverage } = await live.getBills({ q: 'voter registration' });
 
     assert.strictEqual(mode, 'search');
     assert.ok(coverage > 0);
-    assert.ok(bills.length >= 1);
-    assert.ok(bills.every((b) => /voter registration/i.test(b.title)));
+
+    // Matched on its title.
+    assert.ok(bills.some((b) => /voter registration/i.test(b.title)));
+    // Matched on its summary alone — the phrase appears nowhere in this
+    // bill's title, which is exactly why summary search was added.
+    assert.ok(bills.some((b) => b.id === '119-hr-5500'));
+    // And nothing that mentions it in neither.
+    assert.ok(!bills.some((b) => b.id === '119-s-4400'));
   });
 
   /* ---- bill Q&A ---- */

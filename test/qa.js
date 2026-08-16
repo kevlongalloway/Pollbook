@@ -13,6 +13,10 @@
  * Run: node test/qa.js
  */
 
+// Hermetic: never read or write the on-disk cache snapshot from a test run.
+process.env.CACHE_PERSIST = '0';
+
+
 const assert = require('node:assert');
 const http = require('node:http');
 

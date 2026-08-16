@@ -36,6 +36,9 @@ const BILL_TTL = 6 * HOUR;
 // Pages of 250 pulled for the feed. Each page is one API call, so this trades
 // coverage against the DEMO_KEY budget; a real key makes it free.
 const FEED_PAGES = Number(process.env.CONGRESS_FEED_PAGES) || 3;
+// Summaries are the second discovery channel and each page is another API
+// call, so this is tuned separately from the title feed.
+const SUMMARY_PAGES = Number(process.env.CONGRESS_SUMMARY_PAGES) || 2;
 const PER_PAGE = 250;
 
 /** The bill types Congress.gov recognises, as they appear in URLs. */
@@ -233,6 +236,55 @@ async function recentBills(congress, { pages = FEED_PAGES } = {}) {
   });
 }
 
+/**
+ * Recently-published CRS summaries, as a second discovery channel.
+ *
+ * Title matching alone misses the bills that matter most: an election
+ * provision folded into an appropriations package doesn't announce itself in
+ * the title, and those are precisely the ones that pass. `/summaries` returns
+ * the summary *text* alongside the bill it belongs to, so matching against it
+ * catches bills whose subject only appears in the description.
+ *
+ * It's a complement, not a replacement — a bill has no summary until CRS
+ * writes one, which can lag introduction by weeks, so titles still carry
+ * newly-introduced bills. Callers merge both.
+ */
+async function recentSummaries(congress, { pages = SUMMARY_PAGES } = {}) {
+  return cached(`congress:summaries:${congress}:${pages}`, FEED_TTL, async () => {
+    const rows = [];
+    for (let i = 0; i < pages; i++) {
+      try {
+        const data = await fetchJson(url(`/summaries/${congress}`, {
+          limit: PER_PAGE,
+          offset: i * PER_PAGE,
+          sort: 'updateDate+desc',
+        }), { timeoutMs: 15000 });
+        const batch = data.summaries || [];
+        rows.push(...batch);
+        if (batch.length < PER_PAGE) break;
+      } catch (err) {
+        if (i === 0) throw err;
+        break;
+      }
+    }
+
+    // Several summaries can describe the same bill at different stages; keep
+    // the text of each so a match on any stage still surfaces the bill.
+    const byBill = new Map();
+    for (const r of rows) {
+      const b = r.bill;
+      if (!b) continue;
+      const norm = normalizeBill(b);
+      if (!norm) continue;
+      const prev = byBill.get(norm.id);
+      const text = stripHtml(r.text).slice(0, 4000);
+      if (prev) prev.summaryText = `${prev.summaryText} ${text}`.slice(0, 8000);
+      else byBill.set(norm.id, { ...norm, summaryText: text });
+    }
+    return [...byBill.values()];
+  });
+}
+
 /** Bill detail, with the CRS summary and subjects folded in. */
 async function billById(congress, type, number) {
   const t = String(type).toLowerCase();
@@ -310,6 +362,7 @@ async function billById(congress, type, number) {
 
 module.exports = {
   recentBills,
+  recentSummaries,
   billById,
   parseBillRef,
   isElectionBill,
