@@ -152,7 +152,7 @@ router.get('/verify', requireDatabase, (req, res) => {
 });
 
 /** Consume the token and start a session. */
-router.post('/verify', requireDatabase, authLimiter, csrf.protect, async (req, res, next) => {
+router.post('/verify', requireDatabase, formBody, authLimiter, csrf.protect, async (req, res, next) => {
   try {
     const token = String(req.body?.token || req.query?.token || '');
     const row = await magicLink.consume(token);
@@ -183,8 +183,16 @@ router.post('/verify', requireDatabase, authLimiter, csrf.protect, async (req, r
     });
 
     const target = safeRedirect(row.redirect_to, '/#/account');
-    if (req.accepts(['html', 'json']) === 'html') return res.redirect(302, target);
-    res.json({ signedIn: true, created, redirectTo: target });
+
+    // A plain form post wants a redirect; the interstitial's fetch wants JSON
+    // and asks for it explicitly. Checking for an explicit JSON Accept rather
+    // than using req.accepts() is deliberate: fetch sends `Accept: */*` by
+    // default, which req.accepts() resolves to 'html', so the fetch would get
+    // a redirect it cannot parse and fall back to the form.
+    if (/application\/json/.test(req.headers.accept || '')) {
+      return res.json({ signedIn: true, created, redirectTo: target });
+    }
+    res.redirect(302, target);
   } catch (err) {
     next(err);
   }
@@ -351,7 +359,11 @@ function interstitial(token, csrfToken) {
     fetch(f.action, {
       method: 'POST',
       credentials: 'same-origin',
-      headers: { 'content-type': 'application/json', 'x-pollbook-csrf': f._csrf.value },
+      headers: {
+        'content-type': 'application/json',
+        accept: 'application/json',
+        'x-pollbook-csrf': f._csrf.value
+      },
       body: JSON.stringify({ token: f.token.value })
     }).then(function (r) { return r.json(); })
       .then(function (d) { window.location = d.redirectTo || '/#/account'; })

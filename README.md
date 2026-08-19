@@ -7,14 +7,28 @@ Election awareness app covering **all 50 states + DC** — upcoming elections, w
 ```bash
 npm install
 npm start          # http://localhost:3000 — live data, works with zero config
-npm run dev        # auto-restart on change (Node 18+)
-npm test           # 87 tests, fully offline — every upstream is stubbed
+npm run dev        # auto-restart on change (Node 20+)
+npm test           # 151 tests, fully offline — every upstream is stubbed
 ```
 
 The suite never touches the network: `unit` covers date math and parsers,
 `pagination` and `bills` run the FEC and Congress.gov sources against local
 stubs, `qa` does the same for the AI panels, `cache` pins the behaviour under
-upstream failure, and `routes` exercises the real Express app end to end.
+upstream failure, `subjects` and `nonpartisan` cover the subscription grammar
+and the neutrality rules, `auth` and `notify` run the crypto and the messaging
+adapters against locally generated keys and stub servers, and `routes`
+exercises the real Express app end to end.
+
+Optional, and skipped by default so `npm test` needs nothing configured:
+
+```bash
+npm run migrate                                  # apply the schema
+TEST_DATABASE_URL=postgres://… npm run test:db   # 27 tests against real Postgres
+```
+
+Accounts, alerts and the staff API are additive — with no `DATABASE_URL`
+everything above works exactly as it always has. See **Accounts and alerts**
+below, and `.env.example` for every key.
 
 Deploys straight to Render as a Node web service (`npm start`, port from `PORT` env).
 
@@ -201,9 +215,19 @@ but not a redeploy — point `CACHE_FILE` at a mounted volume if you want it to.
 
 ## Configuration
 
+`.env.example` is the full list, grouped by what it enables and annotated with
+what breaks without it. The table below covers the data-and-AI half; the
+accounts half is documented in **Accounts and alerts**.
+
 | Env | Default | Purpose |
 |---|---|---|
 | `PORT` | `3000` | HTTP port |
+| `DATABASE_URL` | none | Enables accounts, alerts and the staff API. Without it the site is exactly what it was before: fully working, entirely anonymous. |
+| `SESSION_SECRET` | none | Signs session and unsubscribe tokens. **Required in production** — the process refuses to boot without it rather than sign cookies with a key that changes on every deploy. |
+| `MAILING_ADDRESS` | none | Physical postal address, required by CAN-SPAM in every message. Rendering throws in production without it rather than quietly omitting it. |
+| `ENABLE_JOBS` | off | Runs the background jobs (deadline reminders, the send queue, retention). Safe on every instance — each job claims work with `FOR UPDATE SKIP LOCKED`. |
+| `SEND_ENABLED` | on | Set `0` to stop everything leaving the queue. The kill switch that survives a restart. |
+| `SMS_ENABLED` | off | The deliberate second switch for SMS, so a deploy carrying Twilio credentials cannot start texting before A2P 10DLC registration is approved. |
 | `DATA_PROVIDER` | `live` | `live`, `mock` (offline fictional seed data), or `google-civic` (stub). **If your deploy sets this to `mock`, unset it** — every figure will be fictional. |
 | `FEC_API_KEY` | `DEMO_KEY` | OpenFEC key — get one free at api.open.fec.gov/developers. Strongly recommended: the funding panels make several FEC calls per candidate page, and `DEMO_KEY` allows only 30/hour across all users. |
 | `FEC_API_BASE` | OpenFEC v1 | Override the API base — used by `test/pagination.js` to run against a stub. |
@@ -238,6 +262,197 @@ The tradeoff is that every question costs a search, including ones the profile c
 Answers come back with the sources consulted, rendered as links under the reply and persisted with the conversation — on a nonpartisan election site, a claim the model pulled off the open web should be checkable.
 
 **Treating search results as hostile.** Anyone who can rank for a candidate's name can put text in front of this model, and the realistic harm here is a partisan claim laundered through an assistant users expect to be neutral. Retrieved text is fenced accordingly: it rides in the user turn, never the system prompt, so the rules are established before any untrusted content appears; it sits between sentinels that label it untrusted data; control characters, zero-width characters and chat-template tokens (`<|im_start|>`, `[INST]`) are stripped at the source; snippets are capped at 500 characters and the whole retrieved block at 4,000; and non-`http(s)` URLs are dropped both server-side and again before any `href` is rendered. This is mitigation, not a guarantee — the visible source list is the part that makes a bad answer auditable.
+
+## Accounts and alerts
+
+Pollbook is stateless by default and stays that way. **With no `DATABASE_URL`,
+nothing above changes** — every page, every endpoint, every anonymous visitor
+behaves exactly as it did before accounts existed. Account routes answer `503`
+with an explanation instead of failing, and `test/routes.js` boots the real
+server with no database to keep that true.
+
+An account adds one thing: "Track this election" stops being a note to
+yourself in `localStorage` and becomes an actual reminder to check your
+registration and to vote.
+
+```bash
+cp .env.example .env        # every key, grouped, with what breaks without it
+npm run migrate             # or let it run at boot; RUN_MIGRATIONS=0 to opt out
+npm start
+```
+
+With a database and **no messaging keys at all**, the whole flow is
+exercisable locally: the sign-in link prints to stdout. That property is why
+magic-link sign-in was built first rather than last.
+
+### Signing in
+
+Three ways in, all landing on the same session cookie: **Google**, **Sign in
+with Apple**, and a **passwordless email link**. There are no passwords
+anywhere — no hash to leak, no reuse risk, no native bcrypt build.
+
+`pg` is the only dependency this added. JWT signing and verification, PKCE,
+webhook HMACs and cookie signing are all `node:crypto` — see `src/lib/jwt.js`,
+which exists anyway because Apple makes you sign your own client secret.
+
+Three details cost an afternoon each and are worth knowing before you touch
+that code:
+
+- **Apple's ES256 signature must be raw `r||s`**, so `dsaEncoding:
+  'ieee-p1363'`. Node's default DER encoding is rejected as `invalid_client`,
+  which reads exactly like a wrong key ID.
+- **Apple's callback is a cross-site POST** (`response_mode=form_post`), so a
+  `SameSite=Lax` cookie is never sent with it. The OAuth transaction lives in
+  Postgres instead, which also lets the callback land on a different instance
+  than the one that started the flow.
+- **Mail scanners fetch every link in an inbound message**, burning
+  single-use tokens before a human clicks. The emailed link renders a page
+  with a button that POSTs, rather than acting on the `GET`.
+
+Sessions are opaque, revocable rows rather than JWTs: offboarding, "sign out
+everywhere" and the step-up window that gates subscriber data all need the
+server to be able to say no *now*, and every authenticated request already
+touches Postgres.
+
+### Roles
+
+Ten roles, and everything checks a **permission**, never a role name. Two
+separations are deliberate and are the point of the model:
+
+| Role | Holds | Notably does **not** hold |
+|---|---|---|
+| `subscriber` | Their own data, export, deletion | — |
+| `viewer` | Aggregates, drafts, read-only | Anything that writes |
+| `editor` | `broadcast.draft`, `template.draft`, `taxonomy.propose` | Any subscriber data; sending; approving |
+| `analyst` | Aggregate export, deliverability | Any subscriber data |
+| `support` | `pii.read_single` (one exact address, audited), `suppression.add` | Listing or exporting subscribers |
+| `approver` | `broadcast.approve` | **`broadcast.draft`** — cannot approve their own words |
+| `sender` | `broadcast.send`, the kill switch | Drafting, approving |
+| `compliance` | Consent, audit, retention, DSARs | Sending anything |
+| `admin` | Config, jobs, `roles.grant`, audit | **Sending broadcasts, and subscriber PII** |
+| `owner` | `roles.grant_any` | — |
+
+**`admin` cannot send a message or read a subscriber record.** A compromised
+engineering account should not be able to text forty thousand people, and
+should not be able to download the list either.
+
+**`pii.export_bulk` is granted to no role at all.** Holding it requires an
+owner making a deliberate grant to one named person, and `lib/permissions.js`
+refuses to resolve it from a grant with no expiry. There is no standing
+ability to export the subscriber list, and no button for it.
+
+### What we collect, and what we refuse to
+
+Collected: email; phone only with its own separate consent; state, and
+optionally ZIP5; IANA timezone (for quiet hours); which races and issues you
+follow; how often you want to hear from us; and an immutable consent record —
+the verbatim words shown, their version and hash, the IP, and the timestamp.
+
+**Not collected, deliberately: party affiliation or registration, political
+views, voting history, voter-file matches, home address, or date of birth.**
+There is no database column for any of them. `test/nonpartisan.js` reads the
+migration files and fails the build if one appears.
+
+That is the difference between a nonpartisan claim you have to trust and one
+that is structurally true: you cannot target on data you never stored, and it
+cannot leak.
+
+`GET /api/me/export` returns everything held about one person, consent history
+included. `POST /api/me/delete` removes it, leaving only a suppression
+tombstone — which is what makes "delete my account" and "never contact me
+again" compatible rather than contradictory.
+
+### How the nonpartisan rules are enforced
+
+Not a policy document. `src/lib/nonpartisan.js` runs at draft, at approval,
+and again on the finished bytes inside the sender, because copy can change in
+between:
+
+- **Express advocacy is blocked** on the *Buckley v. Valeo* magic-words test —
+  "vote for", "defeat", "elect" near a name.
+- **The balance rule**: a message naming any candidate in a race must name
+  every qualifying candidate, **in alphabetical order by surname**. Qualifying
+  is objective and published — an incumbent, or a prediction market, or 1% of
+  everything raised in the race. The ordering check is the part people are
+  surprised by and the part that matters most: listing the front-runner first
+  is a thumb on the scale nobody consciously notices.
+- **Fundraising links are blocked outright**, in the body and in the sources.
+  A civic reminder that links to a donation page is a fundraising email in a
+  costume.
+- **Odds copy has no free-text path.** "Market price" cannot become "likely to
+  win"; the sentence is generated.
+
+And four things the database enforces, where no `if` statement can be removed
+in a hurry:
+
+- `broadcasts`: `CHECK (approved_by <> created_by)`.
+- `notification_events`: `auto_send` is constrained to logistics categories,
+  so anything editorial must pass a human.
+- Every broadcast and event must carry at least one source.
+- `audit_log` and `consent_records` are append-only via triggers **and**
+  hash-chained, so tampering is detectable by someone holding database
+  credentials. A daily job walks the chain.
+
+`broadcast_audience` has six columns and no JSON escape hatch: races, issues,
+states, channels, seat rollup, recency. There is nowhere to type "Republicans
+in Georgia", and nothing to type it against.
+
+Everything sent is published at `GET /api/transparency/broadcasts` and on
+`#/transparency`, with sources, audience criteria and recipient counts.
+`/api/transparency/balance` reports party-mention ratios month by month.
+Publishing your own send log is the only one of these safeguards that still
+works if the people running Pollbook stop wanting it to.
+
+### The notification pipeline
+
+An **event** is a fact about the world; an **outbox row** is one message to
+one person on one channel. Everything hard falls out of the database enforcing
+that split:
+
+- Never twice — `UNIQUE (event_id, user_id, channel)`.
+- Never at 3am — `send_after` is computed in the recipient's timezone and
+  re-checked at claim, because a row retrying since yesterday carries a stale
+  answer. An unknown timezone falls back to the narrowest safe window, never
+  the broadest.
+- Never on two instances — claiming uses `FOR UPDATE SKIP LOCKED`, so
+  `ENABLE_JOBS=1` is safe everywhere. No Redis, no leader election.
+- Never after a STOP — suppression and consent are re-checked immediately
+  before dispatch, not just at fanout. That is what stops the "one more email
+  after unsubscribing" that people actually complain about.
+
+Every email carries a one-click unsubscribe with the RFC 8058 headers Gmail
+and Yahoo now require, the CAN-SPAM postal address, and the funding line —
+added by `src/notify/render.js` rather than by each template, because a
+requirement that depends on an author remembering it will eventually be
+missing from the one message that matters.
+
+### Two prerequisites with real lead times
+
+Neither is code. Both gate launch.
+
+1. **A2P 10DLC registration** for SMS: weeks, and the Political use case is
+   vetted against your entity type — a general commercial LLC often cannot
+   register for it and needs a different campaign class. `SMS_ENABLED` is a
+   deliberate second switch so a deploy carrying Twilio credentials cannot
+   start texting before the registration that permits it exists.
+2. **Apple Private Email Relay** domain registration: without it, mail to
+   Sign-in-with-Apple users is dropped silently, with no bounce.
+
+### One thing the reminders deliberately do not say
+
+There is no sourced, per-state voter-registration deadline table in this
+repo. `usStates.js` has primary and general dates derived from statute and a
+vote.gov link, and nothing more.
+
+So deadline reminders anchor on the **election date**, which is defensible,
+and send the reader to their state for the deadline itself — rather than
+asserting "register by October 6" from a constant nobody can cite. That is
+the same discipline as the watchlist in `electionBills.js`, which drops a bill
+rather than render an unverified one, and the money-flow diagram, which drops
+a figure rather than force it.
+
+When a sourced table exists — one citation per row, rendered in the message —
+the templates get a version 2 that names the date.
 
 ## Brand assets and link previews
 
@@ -290,6 +505,29 @@ src/sources/markets.js             PredictIt odds + candidate matching
 src/sources/wikipedia.js           Bio + political-positions extraction
 src/sources/news.js                Google News RSS
 src/sources/webSearch.js           Web search for Q&A (Tavily, Google News RSS fallback)
+
+  — everything below is inert without DATABASE_URL —
+
+src/db/index.js                    pg pool; enabled() gates every account feature
+src/db/migrate.js                  Migration runner: advisory lock, checksums, per-file transaction
+src/db/migrations/*.sql            The schema, in order. 001 explains what it deliberately omits
+src/lib/nonpartisan.js             The neutrality linter, balance rule, and closed audience schema
+src/lib/subjects.js                Grammar for trackable races/elections; seats carry across cycles
+src/lib/session.js                 Opaque revocable sessions; step-up for PII and sending
+src/lib/permissions.js             Roles → permissions; expiring grants
+src/lib/consent.js                 Append-only consent log + the suppression list
+src/lib/audit.js                   Hash-chained audit writes, PII-scrubbed
+src/lib/errors.js                  Keeps Postgres row values and OAuth codes out of logs
+src/lib/jwt.js                     ES256 signing (Apple) + RS256/ES256 verification, node:crypto
+src/auth/{google,apple,magicLink}.js  The three ways in
+src/notify/render.js               The only path to a sendable message; adds the required footers
+src/notify/outbox.js               Fanout, claiming, retry, quiet hours
+src/notify/providers/              Resend, Twilio, and console/memory for local work
+src/workers/                       Scheduler + producers (deadlines, odds, news, reconcile, retention)
+src/routes/{auth,account,admin,transparency,webhooks}.js
+src/services/{subscriberService,broadcastService}.js
+portal/                            Staff frontend — scaffold only; README documents the API it calls
+
 public/                            Vanilla frontend (hash-routed SPA)
 public/logo.svg                    Master mark — source for every icon
 scripts/generate-assets.js         Regenerates favicons + og-image.png from it

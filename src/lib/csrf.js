@@ -90,9 +90,15 @@ function protect(req, res, next) {
   }
 
   const cookieToken = cookies.read(req, COOKIE);
-  const headerToken = req.headers[HEADER];
 
-  if (!cookieToken || !headerToken || !equal(cookieToken, headerToken)) {
+  // A plain HTML form cannot set a header, so a `_csrf` field is accepted as
+  // well. That matters for exactly one path — the sign-in interstitial's
+  // no-JavaScript fallback — and it is no weaker: an attacker on another
+  // origin can read neither the cookie nor the field, and the Origin check
+  // above has already run.
+  const submitted = req.headers[HEADER] || req.body?._csrf;
+
+  if (!cookieToken || !submitted || !equal(cookieToken, submitted)) {
     const err = new Error('Your session token did not match. Reload the page and try again.');
     err.status = 403;
     err.code = 'PB_CSRF_TOKEN';

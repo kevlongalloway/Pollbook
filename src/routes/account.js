@@ -146,11 +146,20 @@ router.get('/preferences/:token', requireDatabase, async (req, res, next) => {
 
 /* ---------------- authenticated ---------------- */
 
-router.use(requireDatabase, session.requireAuth);
+router.use(requireDatabase);
 
-/** Who am I, and what can I do? The portal renders against `permissions`. */
+/**
+ * Who am I, and what can I do? The portal renders against `permissions`.
+ *
+ * Answers 200 with `signedIn: false` rather than 401 when there is no
+ * session. This is a "who am I" probe, not a protected resource, and most
+ * visitors to this site are deliberately anonymous — a 401 here would put a
+ * red line in the browser console on essentially every page load, for the
+ * entirely normal case of somebody reading about an election.
+ */
 router.get('/', async (req, res, next) => {
   try {
+    if (!req.user) return res.json({ signedIn: false, user: null });
     const [prefs, subs, issues, contacts, resolved] = await Promise.all([
       db.one('SELECT * FROM notification_preferences WHERE user_id = $1', [req.user.id]),
       subscribers.listSubscriptions(req.user.id),
@@ -163,6 +172,7 @@ router.get('/', async (req, res, next) => {
     ]);
 
     res.json({
+      signedIn: true,
       user: {
         id: req.user.publicId,
         email: req.user.email,
@@ -193,7 +203,7 @@ router.get('/', async (req, res, next) => {
   }
 });
 
-router.use(csrf.protect);
+router.use(session.requireAuth, csrf.protect);
 
 router.patch('/profile', async (req, res, next) => {
   try {
