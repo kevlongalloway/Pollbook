@@ -5,6 +5,7 @@ const { askAboutBill } = require('../lib/billQa');
 const webSearch = require('../sources/webSearch');
 const { BILL_TYPES } = require('../sources/congress');
 const { askLimiter, apiLimiter } = require('../lib/rateLimit');
+const errors = require('../lib/errors');
 
 const router = express.Router();
 
@@ -189,12 +190,10 @@ router.get('/markets/national', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
-router.use((err, req, res, next) => {
-  console.error(err);
-  // Errors flagged with a status carry a user-safe message (e.g. an
-  // upstream data source being down); everything else stays generic.
-  if (err.status) return res.status(err.status).json({ error: err.message });
-  res.status(500).json({ error: 'Internal error' });
-});
+// Errors flagged with a status carry a user-safe message (e.g. an upstream
+// data source being down); everything else stays generic. The log line goes
+// through lib/errors so a Postgres constraint violation cannot write the row
+// that triggered it — which may be somebody's email address — into the log.
+router.use(errors.handler('api'));
 
 module.exports = router;
