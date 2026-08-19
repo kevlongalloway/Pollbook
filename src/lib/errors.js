@@ -103,13 +103,29 @@ function forClient(err) {
 function handler(label) {
   return function errorHandler(err, req, res, next) {
     const { status, body } = forClient(err);
-    // A tagged 4xx or 503 is an expected outcome, not an incident. Logging
-    // every "sign in to do that" buries the ones that matter.
-    if (!err?.status || status >= 500) {
-      console.error(`${label}:`, forLog(err));
-    }
+    if (worthLogging(err, status)) console.error(`${label}:`, forLog(err));
     res.status(status).json(body);
   };
 }
 
-module.exports = { forLog, forClient, handler, scrubMessage, PG_SENSITIVE };
+/**
+ * Is this error news?
+ *
+ * An untagged error is always a bug and always logged. A tagged one was
+ * anticipated by whoever wrote it, so a 4xx is an ordinary outcome — logging
+ * every "sign in to do that" buries the lines that matter. 503 is the same:
+ * by the convention in this codebase it means a capability is not configured
+ * on this instance, which is a deployment fact rather than an incident, and
+ * it would otherwise fire on every request to an account route on a
+ * database-less deploy.
+ *
+ * A tagged 500 or 502 still gets logged — those say something went wrong
+ * upstream or internally, which is exactly what a log is for.
+ */
+function worthLogging(err, status) {
+  if (!err?.status) return true;
+  if (status < 500) return false;
+  return status !== 503;
+}
+
+module.exports = { forLog, forClient, handler, worthLogging, scrubMessage, PG_SENSITIVE };

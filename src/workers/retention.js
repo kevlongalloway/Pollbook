@@ -109,6 +109,9 @@ const RETAINED = {
     'Seven years, append-only. An audit log with a delete job is not an audit log.',
   users:
     'Until the account is deleted, which is the person\'s decision rather than a timer.',
+  user_identities:
+    'Same lifetime as the account. A provider subject is what makes signing in again work, so ' +
+    'ageing it out would silently orphan somebody from their own account.',
   contact_channels:
     'Same lifetime as the account.',
   suppressions:

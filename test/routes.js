@@ -273,10 +273,102 @@ const upstream = http.createServer((req, res) => {
     assert.match(results[3].body.error, /quota/i, 'the global message should differ from the per-IP one');
   });
 
+  /* ---------------- the real app, with no database ---------------- */
+
+  /*
+   * Everything above runs against a hand-built app carrying only the /api
+   * router. These last checks boot the *actual* server.js, because two of its
+   * properties are invisible to any other test and both fail silently:
+   *
+   *   - `app.get('*')` matches anything, so a router mounted after it is
+   *     unreachable and returns index.html with a 200 — which reads on the
+   *     client as a JSON parse error and sends you looking somewhere else
+   *     entirely.
+   *   - Accounts are additive. With no DATABASE_URL the site must still serve
+   *     every anonymous page exactly as it did before any of this existed.
+   */
+
+  delete process.env.DATABASE_URL;
+  const { app: realApp } = require('../server.js');
+  const realServer = realApp.listen(0);
+  await new Promise((r) => realServer.once('listening', r));
+  const realBase = `http://127.0.0.1:${realServer.address().port}`;
+
+  const fetchReal = async (path, init) => {
+    const res = await fetch(`${realBase}${path}`, init);
+    const text = await res.text();
+    let json = null;
+    try { json = JSON.parse(text); } catch { /* html */ }
+    return { status: res.status, text, json };
+  };
+
+  test('every router is mounted above the SPA fallback', async () => {
+    // A mount that got shadowed answers with index.html and a 200, so the
+    // assertion is on the body being JSON, not on the status.
+    for (const path of ['/api/meta', '/api/auth/providers', '/api/transparency']) {
+      const { json, text } = await fetchReal(path);
+      assert.ok(json, `${path} returned HTML — its router is shadowed by app.get('*')`);
+      assert.ok(!text.includes('<!DOCTYPE'), `${path} fell through to the SPA`);
+    }
+  });
+
+  test('account routes report 503 rather than crashing with no database', async () => {
+    for (const path of ['/api/me', '/api/admin/metrics']) {
+      const { status, json } = await fetchReal(path);
+      assert.strictEqual(status, 503, `${path} should degrade, not fail`);
+      // The message is written for a person, per the err.status convention.
+      assert.ok(/database|not available/i.test(json.error), `${path}: ${json.error}`);
+    }
+  });
+
+  test('sign-in is honestly reported as unavailable with no database', async () => {
+    const { json } = await fetchReal('/api/auth/providers');
+    assert.strictEqual(json.accountsEnabled, false);
+    assert.strictEqual(json.email, false);
+  });
+
+  test('anonymous browsing is untouched with no database', async () => {
+    // The hard constraint carried from the roadmap: an account adds
+    // capability and never gates what is already free.
+    for (const path of ['/api/areas', '/api/elections?state=GA', '/api/markets/national']) {
+      const { status } = await fetchReal(path);
+      assert.strictEqual(status, 200, `${path} must work without an account`);
+    }
+    const home = await fetchReal('/');
+    assert.strictEqual(home.status, 200);
+    assert.ok(home.text.includes('<!DOCTYPE html>'));
+    assert.ok(!home.text.includes('__BASE_URL__'), 'the OG placeholder should be substituted');
+  });
+
+  test('the footer carries the funding disclaimer', async () => {
+    const { text } = await fetchReal('/');
+    assert.ok(text.includes('Nolvek Technologies'));
+    assert.ok(text.includes('not authorized by any candidate'));
+  });
+
+  test('the transparency record is public and states what is not collected', async () => {
+    const { status, json } = await fetchReal('/api/transparency');
+    assert.strictEqual(status, 200);
+    assert.ok(json.doNotCollect.some((line) => /party affiliation/i.test(line)));
+    // The audience dimensions are published so the claim is checkable.
+    assert.ok(!json.audienceDimensions.includes('party'));
+  });
+
+  test('webhooks are mounted outside the API rate limiter', async () => {
+    // Providers burst during a send; rate-limiting delivery receipts would
+    // make a mailing rate-limit its own results.
+    const { status } = await fetchReal('/hooks/resend', {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}',
+    });
+    assert.ok(status !== 404, 'the webhook router is not mounted');
+    assert.ok(status !== 429);
+  });
+
   for (const { name, fn } of checks) {
     try { await fn(); passed++; }
     catch (err) { console.error(`✗ ${name}\n  ${err.message}`); process.exitCode = 1; }
   }
+  realServer.close();
 
   console.log(`routes: ${passed}/${checks.length} passed`);
   server.close();

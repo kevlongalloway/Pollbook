@@ -215,8 +215,10 @@ function surnameOf(name) {
   const base = raw.includes(',') ? raw.slice(0, raw.indexOf(',')) : raw;
   const parts = base
     .replace(/\b(?:jr|sr|ii|iii|iv|md|phd|esq)\.?\b/gi, '')
-    .trim()
     .split(/\s+/)
+    // Stripping "Jr." leaves a bare "." behind, which would then be read as
+    // the surname and match nothing.
+    .map((part) => part.replace(/^[^\p{L}]+|[^\p{L}]+$/gu, ''))
     .filter(Boolean);
   return (parts.at(-1) || '').toLowerCase();
 }
@@ -555,7 +557,9 @@ function checkAudience(audience) {
    way an odds number reaches a subscriber.                                   */
 
 const ODDS_FORBIDDEN = [
-  /\bforecast\b/i, /\bpredicts?\b/i, /\blikely\s+to\s+win\b/i, /\bwill\s+win\b/i,
+  // Prefix-anchored rather than whole-word: "forecasters", "forecasting" and
+  // "predicted" all make the same claim that a market price is a prediction.
+  /\bforecast/i, /\bpredict/i, /\blikely\s+to\s+win\b/i, /\bwill\s+win\b/i,
   /\bexpected\s+to\s+win\b/i, /\bchance\s+of\s+winning\b/i, /\bodds\s+of\s+victory\b/i,
   /\bsurges?\b/i, /\bcollapses?\b/i, /\bcrushing\b/i, /\bdominat/i,
 ];
