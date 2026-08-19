@@ -6,12 +6,15 @@
   "scripts": {
     "start": "node server.js",
     "dev": "node --watch server.js",
-    "test": "node test/unit.js && node test/pagination.js && node test/qa.js && node test/bills.js && node test/cache.js && node test/routes.js"
+    "migrate": "node src/db/migrate.js",
+    "test": "node test/unit.js && node test/pagination.js && node test/qa.js && node test/bills.js && node test/cache.js && node test/subjects.js && node test/nonpartisan.js && node test/auth.js && node test/notify.js && node test/routes.js && node test/db.js",
+    "test:db": "node test/db.js --require-database"
   },
   "engines": {
-    "node": ">=18"
+    "node": ">=20"
   },
   "dependencies": {
-    "express": "^4.19.2"
+    "express": "^4.19.2",
+    "pg": "^8.23.0"
   }
 }

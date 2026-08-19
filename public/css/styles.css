@@ -660,6 +660,34 @@ button {
 
 .footer-note { font-size: 0.78rem; color: #4A4F55; max-width: 68ch; }
 
+.footer-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1.25rem;
+  margin-top: 0.9rem;
+  font-size: 0.78rem;
+}
+
+.footer-links a { color: var(--blue); text-decoration: underline; text-underline-offset: 2px; }
+
+/* The funding line sits below its own rule so it reads as a colophon rather
+   than as one more sourcing caveat. "Paid for by" is a term of art in federal
+   disclaimer law (52 U.S.C. §30120) that attaches to express advocacy, which
+   this site does not carry — so the sentence after it says plainly that
+   nothing here is authorized by a campaign. */
+.footer-colophon {
+  margin-top: 1rem;
+  padding-top: 0.85rem;
+  border-top: 1px solid var(--concrete);
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  letter-spacing: 0.04em;
+  color: #4A4F55;
+  max-width: 68ch;
+}
+
+.footer-colophon a { color: inherit; text-decoration: underline; text-underline-offset: 2px; }
+
 /* ---------- masthead search ---------- */
 
 .masthead-search {
