@@ -660,6 +660,34 @@ button {
 
 .footer-note { font-size: 0.78rem; color: #4A4F55; max-width: 68ch; }
 
+.footer-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1.25rem;
+  margin-top: 0.9rem;
+  font-size: 0.78rem;
+}
+
+.footer-links a { color: var(--blue); text-decoration: underline; text-underline-offset: 2px; }
+
+/* The funding line sits below its own rule so it reads as a colophon rather
+   than as one more sourcing caveat. "Paid for by" is a term of art in federal
+   disclaimer law (52 U.S.C. §30120) that attaches to express advocacy, which
+   this site does not carry — so the sentence after it says plainly that
+   nothing here is authorized by a campaign. */
+.footer-colophon {
+  margin-top: 1rem;
+  padding-top: 0.85rem;
+  border-top: 1px solid var(--concrete);
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  letter-spacing: 0.04em;
+  color: #4A4F55;
+  max-width: 68ch;
+}
+
+.footer-colophon a { color: inherit; text-decoration: underline; text-underline-offset: 2px; }
+
 /* ---------- masthead search ---------- */
 
 .masthead-search {
@@ -1568,6 +1596,166 @@ button.deep-link { cursor: pointer; font-family: var(--font-mono); }
 
 /* ---------- responsive ---------- */
 
+/* ---------- accounts, policy pages ---------- */
+
+.account-form { max-width: 42rem; }
+
+.account-form label {
+  display: block;
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  margin-bottom: 0.35rem;
+}
+
+.account-form input[type="email"],
+.account-form input[type="tel"],
+.account-form input[type="text"],
+.account-form select {
+  width: 100%;
+  max-width: 24rem;
+  padding: 0.65rem 0.75rem;
+  border: 2px solid var(--ink);
+  background: var(--white);
+  font: inherit;
+  font-size: 0.95rem;
+}
+
+.account-form input:focus-visible,
+.account-form select:focus-visible { outline: 3px solid var(--yellow); outline-offset: 1px; }
+
+.account-optional {
+  font-family: var(--font-body);
+  text-transform: none;
+  letter-spacing: 0;
+  color: #4A4F55;
+  font-weight: 400;
+}
+
+/* A checkbox and its explanation, side by side. The explanation matters:
+   these choices are about what lands in somebody's inbox.
+
+   Scoped under .account-form as well as bare, because `.account-form label`
+   above is more specific than a lone class and would otherwise force these
+   into the uppercase mono field-label style. */
+.account-check,
+.account-form .account-check {
+  display: flex;
+  gap: 0.7rem;
+  align-items: flex-start;
+  padding: 0.7rem 0;
+  border-bottom: 1px solid var(--concrete);
+  font-family: var(--font-body);
+  font-size: 0.9rem;
+  letter-spacing: 0;
+  text-transform: none;
+  cursor: pointer;
+}
+
+.account-check input[type="checkbox"] { margin-top: 0.2rem; width: 1.05rem; height: 1.05rem; flex: none; }
+.account-note { font-size: 0.8rem; color: #4A4F55; }
+
+.account-saved {
+  display: inline-block;
+  margin-left: 0.75rem;
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  color: var(--blue);
+}
+
+.account-actions { display: flex; flex-wrap: wrap; gap: 0.75rem; }
+.account-oauth { display: flex; flex-wrap: wrap; gap: 0.75rem; margin-top: 0.5rem; }
+
+/* The subscription row is a link plus a control, so the anchor takes the
+   grid columns the whole line takes elsewhere. */
+.sub-link {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  gap: clamp(0.75rem, 2.5vw, 1.5rem);
+  text-decoration: none;
+  flex: 1;
+}
+
+.ballot-line:has(.sub-link) { display: flex; }
+
+.account-remove {
+  background: none;
+  border: 1px solid var(--concrete);
+  color: #4A4F55;
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  padding: 0.3rem 0.6rem;
+  cursor: pointer;
+  align-self: center;
+  margin-left: auto;
+}
+
+.account-remove:hover { border-color: var(--ink); color: var(--ink); }
+
+/* Deliberately unlike every other button here. Deleting an account is the
+   one irreversible thing on this site. */
+.account-danger {
+  background: var(--white);
+  border: 2px solid #B3261E;
+  color: #B3261E;
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  padding: 0.7rem 1.1rem;
+  cursor: pointer;
+}
+
+.account-danger:hover { background: #B3261E; color: var(--white); }
+
+.issue-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(19rem, 1fr));
+  gap: 0 1.75rem;
+}
+
+.policy-list { max-width: 70ch; margin: 0 0 1rem 1.1rem; }
+.policy-list li { margin-bottom: 0.55rem; font-size: 0.92rem; line-height: 1.5; }
+.policy-list code { font-family: var(--font-mono); font-size: 0.85em; }
+
+/* The refusals are the point of that page, so they read as a list of
+   commitments rather than as fine print. */
+.policy-list--refuse { list-style: none; margin-left: 0; }
+.policy-list--refuse li { padding-left: 1.4rem; position: relative; }
+.policy-list--refuse li::before {
+  content: "✕";
+  position: absolute;
+  left: 0;
+  color: var(--blue);
+  font-weight: 700;
+}
+
+.sent-message {
+  border: 1px solid var(--concrete);
+  border-left: 4px solid var(--blue);
+  padding: 1.1rem 1.25rem;
+  margin-bottom: 1.25rem;
+  background: var(--white);
+}
+
+.sent-message h3 { font-size: 1.05rem; margin-bottom: 0.6rem; }
+
+.sent-body {
+  font-family: var(--font-body);
+  font-size: 0.88rem;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  background: var(--paper);
+  padding: 0.9rem 1rem;
+  margin-bottom: 0.75rem;
+  border: 1px solid var(--concrete);
+}
+
 @media (max-width: 720px) {
   .bill-line { grid-template-columns: auto 1fr; }
   .bill-line .tag { display: none; }
@@ -1590,3 +1778,4 @@ button.deep-link { cursor: pointer; font-family: var(--font-mono); }
   *, *::before, *::after { transition: none !important; animation: none !important; }
   html { scroll-behavior: auto; }
 }
+
